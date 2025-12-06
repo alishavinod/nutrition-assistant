@@ -75,12 +75,6 @@
         <label>Budget amount
           <input id="budget_amount" type="number" step="0.01" value="100" />
         </label>
-        <label>Budget period
-          <select id="budget_period">
-            <option value="week">Week</option>
-            <option value="month">Month</option>
-          </select>
-        </label>
         <label>Goal
           <select id="goal">
             <option value="fat_loss">Fat loss</option>
@@ -148,7 +142,8 @@
           dietary_preference: document.getElementById('diet').value,
           goal: document.getElementById('goal').value,
           allergies: document.getElementById('allergies').value.split(',').map(x => x.trim()).filter(Boolean),
-          period: document.getElementById('period').value
+          period: document.getElementById('period').value,
+          meals_per_day: Number(document.getElementById('meals_per_day').value)
         };
         try {
           const resp = await fetch(`${backend}/recommend`, {

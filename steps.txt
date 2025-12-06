@@ -55,7 +55,6 @@ curl -X POST http://127.0.0.1:8000/plan \
     "profile": {"height_cm":175,"weight_kg":70,"age":30,"sex":"male","activity_level":"moderate"},
     "dietary_preference":"omnivore",
     "budget_amount":100,
-    "budget_period":"week",
     "meals_per_day":3
   }'
 
@@ -79,9 +78,7 @@ curl -X POST http://127.0.0.1:8000/plan \
 "profile": {"height_cm":175,"weight_kg":70,"age":30,"sex":"male","activity_level":"moderate"},
 "dietary_preference":"omnivore",
 "budget_amount":100,
-"budget_period":"week",
-"meals_per_day":3,
-"use_llm": true
+"meals_per_day":3
 }'
 
 

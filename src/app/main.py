@@ -164,6 +164,7 @@ class RecommendRequest(BaseModel):
     goal: Goal = Goal.maintenance
     allergies: List[str] = Field(default_factory=list)
     period: RecommendationPeriod = RecommendationPeriod.one_day
+    meals_per_day: int = Field(3, ge=1, le=6)
 
 class RecommendationResponse(BaseModel):
     period: RecommendationPeriod
@@ -235,7 +236,7 @@ def generate_recommendations_with_llm(req: RecommendRequest) -> Optional[List[Di
     if not model:
         return None
     days = 1 if req.period == RecommendationPeriod.one_day else 7
-    needed_dishes = 3 * days
+    needed_dishes = req.meals_per_day * days
     ingredients_txt = ", ".join(req.ingredients) if req.ingredients else "none specified—use pantry-friendly staples that fit the diet"
     allergies_txt = ", ".join(req.allergies) if req.allergies else "none"
 
@@ -244,7 +245,7 @@ You are a nutrition chef. Recommend simple dishes ONLY using these ingredients: 
 Diet: {req.dietary_preference.value}. Goal: {req.goal.replace('_',' ')}. Allergies: {allergies_txt}.
 Return JSON: {{"dishes":[{{"day":1,"name":"...","reason":"...","ingredients_used":["..."],"steps":["..."],"calories":500,"protein_g":40,"carbs_g":50,"fat_g":15}}]}}.
 Days: {days}. Keep names short; avoid missing ingredients.
-Return exactly {needed_dishes} dishes total (3 per day), using day values 1..{days} with three dishes per day.
+Return exactly {needed_dishes} dishes total ({req.meals_per_day} per day), using day values 1..{days} with {req.meals_per_day} dishes per day.
 Respond with JSON only, no markdown code fences or extra text. Each dish must have 3-8 short steps (one action per step).
 """
     raw = _ollama_generate(prompt, model=model)
@@ -275,11 +276,32 @@ Respond with JSON only, no markdown code fences or extra text. Each dish must ha
                     fat_g=d.get("fat_g"),
                 )
             )
-        if len(dishes) < needed_dishes:
+        if not dishes:
             return None
+        # Normalize to exactly needed_dishes (meals_per_day per day); pad by cycling existing dishes if short.
+        if len(dishes) < needed_dishes:
+            base = dishes[:]
+            while len(dishes) < needed_dishes:
+                src = base[len(dishes) % len(base)]
+                dishes.append(
+                    DishRecommendation(
+                        day=(len(dishes) // req.meals_per_day) + 1,
+                        name=src.name,
+                        reason=src.reason,
+                        ingredients_used=src.ingredients_used,
+                        steps=src.steps,
+                        calories=src.calories,
+                        protein_g=src.protein_g,
+                        carbs_g=src.carbs_g,
+                        fat_g=src.fat_g,
+                    )
+                )
         if len(dishes) > needed_dishes:
             dishes = dishes[:needed_dishes]
-        return dishes or None
+        # Ensure day labels cycle correctly (meals_per_day dishes per day).
+        for idx, dish in enumerate(dishes):
+            dish.day = (idx // req.meals_per_day) + 1
+        return dishes
     except Exception:
         return None
 

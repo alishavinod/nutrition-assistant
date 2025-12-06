@@ -1,6 +1,6 @@
 # Nutrition Planner Demo
 
-Showcase-ready repo with a structured backend/frontend split. FastAPI powers the API; a static UI works on GitHub Pages and calls your backend. Uses a dummy pricing catalog (no real product API) and an optional local LLM via Ollama.
+Showcase-ready repo with a structured backend/frontend split. FastAPI powers the API; a static UI works on GitHub Pages and calls your backend. Uses a dummy pricing catalog (no real product API) and a local LLM via Ollama.
 
 ## Repo Layout
 - `src/app/` — FastAPI app.
@@ -36,7 +36,7 @@ Health check:
 curl http://127.0.0.1:8000/health
 ```
 
-Generate a plan (LLM optional via `use_llm`):
+Generate a plan (LLM required; 7-day plan):
 ```bash
 curl -X POST http://127.0.0.1:8000/plan \
   -H 'Content-Type: application/json' \
@@ -44,9 +44,7 @@ curl -X POST http://127.0.0.1:8000/plan \
     "profile": {"height_cm":175,"weight_kg":70,"age":30,"sex":"male","activity_level":"moderate"},
     "dietary_preference":"omnivore",
     "budget_amount":100,
-    "budget_period":"week",
-    "meals_per_day":3,
-    "use_llm": false
+    "meals_per_day":3
   }'
 ```
 
