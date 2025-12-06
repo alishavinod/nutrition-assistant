@@ -1,0 +1,9 @@
+so what i want is that  a person gives his details about height, weight etc and using a RAG system we get the info of the number of calories, macros the person needs, now once we get this there will be a simple chatbot where we will ask the question regarding dietary preferences, veg, non veg etc and then we will finally ask him the budget.
+
+now the issue here is that we don't have a product search for any of the instacart/ walmart etc so we cannt fetch the data so what we will do it create a dummy csv for the list of items and its price just for the sake of project whoch if we ever go into production we will us e the api instead
+
+now based on the above info we will use llm etc to create s simple list of foodover week/month(based on budget, asked weekly/monthly) 
+
+so like if a person macros comes out to be 100gm protein, 200gm carbs, 30 gm fat
+
+then llm will give us info like eat chicken breats,rice, youghur in lunch and then we would need to see the nutrition details about these items from instacart sincwe not availble  then a rag system needs to fetch from the internet and also this all should be within the budget, finally using th instacart api we will create a recipe with all of the ingredient we have so that we can give the user a final food epration idea as well

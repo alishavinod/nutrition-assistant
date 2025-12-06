@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nutrition Planner Demo</title>
+  <style>
+    :root { --bg: #0c1220; --card: #141c2c; --accent: #4fd1c5; --text: #e8edf6; --muted: #9aa7bf; }
+    body { margin: 0; font-family: 'Inter', system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); display: flex; justify-content: center; padding: 24px; }
+    .container { width: min(1100px, 100%); }
+    h1 { margin: 0 0 8px; }
+    p { color: var(--muted); margin: 0 0 16px; }
+    .card { background: var(--card); border: 1px solid #1f2a40; border-radius: 14px; padding: 16px; margin-bottom: 16px; box-shadow: 0 10px 40px rgba(0,0,0,0.25); }
+    form { display: grid; grid-template-columns: repeat(auto-fit,minmax(240px,1fr)); gap: 12px; }
+    label { display: flex; flex-direction: column; font-size: 14px; gap: 6px; }
+    input, select { padding: 10px; border-radius: 10px; border: 1px solid #1f2a40; background: #10182a; color: var(--text); }
+    button { background: var(--accent); color: #0c1220; border: none; padding: 12px 16px; border-radius: 10px; font-weight: 600; cursor: pointer; width: 200px; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .actions { display: flex; gap: 12px; align-items: center; margin-top: 12px; }
+    pre { background: #0d1424; border: 1px solid #1f2a40; padding: 14px; border-radius: 12px; color: #cbd5e1; overflow: auto; max-height: 420px; }
+    .tag { display: inline-block; background: #1f2a40; color: var(--muted); padding: 4px 8px; border-radius: 8px; font-size: 12px; margin-right: 6px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <h1>Nutrition Planner</h1>
+      <p>Backend defaults to <code>http://localhost:8000</code>. Enable LLM if you have Ollama running and <code>OLLAMA_MODEL</code> set.</p>
+      <label>Backend URL
+        <input id="backend" value="http://localhost:8000" />
+      </label>
+    </div>
+
+    <div class="card">
+      <div class="tag">Profile & Preferences</div>
+      <form id="planner-form">
+        <label>Height (cm)
+          <input id="height_cm" type="number" value="175" required />
+        </label>
+        <label>Weight (kg)
+          <input id="weight_kg" type="number" value="70" required />
+        </label>
+        <label>Age
+          <input id="age" type="number" value="30" required />
+        </label>
+        <label>Sex
+          <select id="sex">
+            <option value="male">Male</option>
+            <option value="female">Female</option>
+          </select>
+        </label>
+        <label>Activity
+          <select id="activity">
+            <option value="moderate">Moderate</option>
+            <option value="sedentary">Sedentary</option>
+            <option value="light">Light</option>
+            <option value="heavy">Heavy</option>
+            <option value="athlete">Athlete</option>
+          </select>
+        </label>
+        <label>Dietary Preference
+          <select id="diet">
+            <option value="omnivore">Omnivore</option>
+            <option value="vegetarian">Vegetarian</option>
+            <option value="vegan">Vegan</option>
+            <option value="pescatarian">Pescatarian</option>
+            <option value="keto">Keto</option>
+            <option value="paleo">Paleo</option>
+          </select>
+        </label>
+        <label>Meals per day
+          <input id="meals_per_day" type="number" min="1" max="6" value="3" />
+        </label>
+        <label>Budget amount
+          <input id="budget_amount" type="number" step="0.01" value="100" />
+        </label>
+        <label>Budget period
+          <select id="budget_period">
+            <option value="week">Week</option>
+            <option value="month">Month</option>
+          </select>
+        </label>
+        <label>Use LLM (Ollama)
+          <select id="use_llm">
+            <option value="false">No</option>
+            <option value="true">Yes</option>
+          </select>
+        </label>
+      </form>
+      <div class="actions">
+        <button id="submit">Generate Plan</button>
+        <span id="status" class="tag">Idle</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="tag">Response</div>
+      <pre id="output">Waiting for response...</pre>
+    </div>
+  </div>
+
+  <script>
+    const output = document.getElementById('output');
+    const statusEl = document.getElementById('status');
+    const setStatus = (txt) => { statusEl.textContent = txt; };
+
+    document.getElementById('submit').addEventListener('click', async () => {
+      output.textContent = 'Loading...';
+      setStatus('Loading...');
+      const backend = document.getElementById('backend').value || 'http://localhost:8000';
+      const payload = {
+        profile: {
+          height_cm: Number(document.getElementById('height_cm').value),
+          weight_kg: Number(document.getElementById('weight_kg').value),
+          age: Number(document.getElementById('age').value),
+          sex: document.getElementById('sex').value,
+          activity_level: document.getElementById('activity').value
+        },
+        dietary_preference: document.getElementById('diet').value,
+        budget_amount: Number(document.getElementById('budget_amount').value),
+        budget_period: document.getElementById('budget_period').value,
+        meals_per_day: Number(document.getElementById('meals_per_day').value),
+        use_llm: document.getElementById('use_llm').value === 'true'
+      };
+      try {
+        const resp = await fetch(`${backend}/plan`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await resp.json();
+        output.textContent = JSON.stringify(data, null, 2);
+        setStatus(resp.ok ? 'OK' : 'Error');
+      } catch (err) {
+        output.textContent = `Error: ${err}`;
+        setStatus('Error');
+      }
+    });
+  </script>
+</body>
+</html>

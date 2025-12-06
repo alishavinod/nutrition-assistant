@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+.python-version
+.venv
+env/
+venv/
+
+# Node/static
+node_modules/
+dist/
+
+# MacOS
+.DS_Store
+
+# Env files
+*.env
+config/*.env
+
+# VSCode/PyCharm
+.idea/
+.vscode/
