@@ -11,6 +11,7 @@
     h1 { margin: 0 0 8px; }
     p { color: var(--muted); margin: 0 0 16px; }
     .card { background: var(--card); border: 1px solid #1f2a40; border-radius: 14px; padding: 16px; margin-bottom: 16px; box-shadow: 0 10px 40px rgba(0,0,0,0.25); }
+    .card .card { background: #10182a; border-color: #1b2538; }
     form { display: grid; grid-template-columns: repeat(auto-fit,minmax(240px,1fr)); gap: 12px; }
     label { display: flex; flex-direction: column; font-size: 14px; gap: 6px; }
     input, select { padding: 10px; border-radius: 10px; border: 1px solid #1f2a40; background: #10182a; color: var(--text); }
@@ -80,62 +81,103 @@
             <option value="month">Month</option>
           </select>
         </label>
-        <label>Use LLM (Ollama)
-          <select id="use_llm">
-            <option value="false">No</option>
-            <option value="true">Yes</option>
+        <label>Goal
+          <select id="goal">
+            <option value="fat_loss">Fat loss</option>
+            <option value="muscle_gain">Muscle gain</option>
+            <option value="maintenance" selected>Maintenance</option>
+          </select>
+        </label>
+        <label>Allergies (comma separated)
+          <input id="allergies" placeholder="peanut, dairy" />
+        </label>
+        <label>Recommendation period
+          <select id="period">
+            <option value="one_day">1 day</option>
+            <option value="seven_days">7 days</option>
           </select>
         </label>
       </form>
       <div class="actions">
-        <button id="submit">Generate Plan</button>
+        <button id="recommend">Recommend Dishes</button>
         <span id="status" class="tag">Idle</span>
       </div>
     </div>
 
     <div class="card">
-      <div class="tag">Response</div>
-      <pre id="output">Waiting for response...</pre>
+      <div class="tag">Dish Recommendations</div>
+      <div id="dish-cards">Waiting for recommendations...</div>
     </div>
   </div>
 
   <script>
-    const output = document.getElementById('output');
     const statusEl = document.getElementById('status');
     const setStatus = (txt) => { statusEl.textContent = txt; };
+    const dishCards = document.getElementById('dish-cards');
 
-    document.getElementById('submit').addEventListener('click', async () => {
-      output.textContent = 'Loading...';
-      setStatus('Loading...');
-      const backend = document.getElementById('backend').value || 'http://localhost:8000';
-      const payload = {
-        profile: {
-          height_cm: Number(document.getElementById('height_cm').value),
-          weight_kg: Number(document.getElementById('weight_kg').value),
-          age: Number(document.getElementById('age').value),
-          sex: document.getElementById('sex').value,
-          activity_level: document.getElementById('activity').value
-        },
-        dietary_preference: document.getElementById('diet').value,
-        budget_amount: Number(document.getElementById('budget_amount').value),
-        budget_period: document.getElementById('budget_period').value,
-        meals_per_day: Number(document.getElementById('meals_per_day').value),
-        use_llm: document.getElementById('use_llm').value === 'true'
-      };
-      try {
-        const resp = await fetch(`${backend}/plan`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        const data = await resp.json();
-        output.textContent = JSON.stringify(data, null, 2);
-        setStatus(resp.ok ? 'OK' : 'Error');
-      } catch (err) {
-        output.textContent = `Error: ${err}`;
-        setStatus('Error');
+    function renderDishes(res) {
+      if (!dishCards) return;
+      if (!res || !Array.isArray(res.dishes)) {
+        dishCards.textContent = 'No dishes returned. Check backend logs or LLM availability.';
+        return;
       }
-    });
+      dishCards.innerHTML = '';
+      res.dishes.forEach(d => {
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.innerHTML = `
+          <div class="tag">Day ${d.day}</div>
+          <h3>${d.name}</h3>
+          <p>${d.reason || ''}</p>
+          <p><strong>Uses:</strong> ${d.ingredients_used.join(', ')}</p>
+          ${d.steps && d.steps.length ? `<ol>${d.steps.map(s => `<li>${s}</li>`).join('')}</ol>` : ''}
+          ${d.calories ? `<p>Macros: ${d.calories} kcal, P:${d.protein_g||'-'} C:${d.carbs_g||'-'} F:${d.fat_g||'-'}</p>` : ''}
+        `;
+        dishCards.appendChild(card);
+      });
+    }
+
+    const recommendBtn = document.getElementById('recommend');
+    if (recommendBtn) {
+      recommendBtn.addEventListener('click', async () => {
+        if (dishCards) dishCards.textContent = 'Loading...';
+        setStatus('Loading recommend...');
+        const backend = document.getElementById('backend').value || 'http://localhost:8000';
+        const payload = {
+          ingredients: [],
+          dietary_preference: document.getElementById('diet').value,
+          goal: document.getElementById('goal').value,
+          allergies: document.getElementById('allergies').value.split(',').map(x => x.trim()).filter(Boolean),
+          period: document.getElementById('period').value
+        };
+        try {
+          const resp = await fetch(`${backend}/recommend`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          let data;
+          try {
+            data = await resp.json();
+          } catch (e) {
+            dishCards.textContent = `Invalid response: ${e}`;
+            setStatus('Error');
+            return;
+          }
+          if (!resp.ok) {
+            const detail = data && (data.detail || data.error || JSON.stringify(data));
+            dishCards.textContent = `Error from backend: ${detail}`;
+            setStatus('Error');
+            return;
+          }
+          renderDishes(data);
+          setStatus('OK');
+        } catch (err) {
+          if (dishCards) dishCards.textContent = `Error: ${err}`;
+          setStatus('Error');
+        }
+      });
+    }
   </script>
 </body>
 </html>

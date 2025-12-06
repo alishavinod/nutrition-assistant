@@ -14,7 +14,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, validator
 import requests
@@ -63,7 +63,8 @@ class BudgetPeriod(str, Enum):
 
 
 class DietaryPreference(str, Enum):
-    non_vegeterian = "omnivore"
+    omnivore = "omnivore"
+    non_vegeterian = "omnivore"  # backward compatibility for existing requests
     vegetarian = "vegetarian"
     vegan = "vegan"
     pescatarian = "pescatarian"
@@ -102,8 +103,8 @@ class PlanRequest(BaseModel):
     macro_split: MacroSplit = MacroSplit()
     target_calories: Optional[int] = Field(None, gt=800, lt=6000)
     use_llm: bool = Field(
-        False,
-        description="If true, attempt to generate the plan via a local LLM (ollama) before falling back to the stub.",
+        True,
+        description="Generate the plan via a local LLM (ollama). No stub fallback is used.",
     )
 
 
@@ -143,6 +144,45 @@ class PlanResponse(BaseModel):
     unknown_items: List[str] = Field(default_factory=list)
     notes: List[str] = Field(default_factory=list)
 
+class Goal(str, Enum):
+    fat_loss = "fat_loss"
+    muscle_gain = "muscle_gain"
+    maintenance = "maintenance"
+
+class RecommendationPeriod(str, Enum):
+    one_day = "one_day"
+    seven_days = "seven_days"
+
+class IngredientInput(BaseModel):
+    name: str
+    quantity: Optional[str] = None
+    notes: Optional[str] = None
+
+class DishRecommendation(BaseModel):
+    day: int
+    name: str
+    reason: str
+    ingredients_used: List[str]
+    steps: List[str] = Field(default_factory=list)
+    calories: Optional[int] = None
+    protein_g: Optional[int] = None
+    carbs_g: Optional[int] = None
+    fat_g: Optional[int] = None
+
+class RecommendRequest(BaseModel):
+    ingredients: List[str] = Field(default_factory=list)
+    dietary_preference: DietaryPreference = DietaryPreference.omnivore
+    goal: Goal = Goal.maintenance
+    allergies: List[str] = Field(default_factory=list)
+    period: RecommendationPeriod = RecommendationPeriod.one_day
+
+class RecommendationResponse(BaseModel):
+    period: RecommendationPeriod
+    dishes: List[DishRecommendation]
+    unknown_items: List[str] = Field(default_factory=list)
+    notes: List[str] = Field(default_factory=list)
+
+
 
 def mifflin_st_jeor(profile: Profile) -> float:
     base = 10 * profile.weight_kg + 6.25 * profile.height_cm - 5 * profile.age
@@ -166,76 +206,6 @@ def compute_targets(req: PlanRequest) -> dict:
     }
 
 
-def stub_meal_plan(req: PlanRequest, targets: dict) -> List[DayPlan]:
-    days = 7 if req.budget_period == BudgetPeriod.week else 30
-    meals: List[DayPlan] = []
-
-    protein_per_meal = targets["protein_g"] // req.meals_per_day
-    carbs_per_meal = targets["carbs_g"] // req.meals_per_day
-    fat_per_meal = targets["fat_g"] // req.meals_per_day
-    calories_per_meal = targets["calories"] // req.meals_per_day
-
-    # Ingredient names are aligned to data/dummy_catalog.csv for pricing.
-    base_meals = {
-        DietaryPreference.omnivore: [
-            ("Breakfast", [("greek yogurt", "1 cup"), ("berries", "1 cup"), ("oats", "1/2 cup"), ("almonds", "1 oz")]),
-            ("Lunch", [("chicken breast", "150 g"), ("rice", "1 cup"), ("broccoli", "1 cup")]),
-            ("Dinner", [("salmon", "150 g"), ("sweet potato", "1 medium"), ("spinach", "1 cup")]),
-        ],
-        DietaryPreference.vegetarian: [
-            ("Breakfast", [("oats", "1 cup"), ("berries", "1 cup"), ("almonds", "1 oz")]),
-            ("Lunch", [("lentils", "1 cup"), ("quinoa", "1 cup"), ("broccoli", "1 cup")]),
-            ("Dinner", [("tofu", "150 g"), ("brown rice", "1 cup"), ("spinach", "1 cup")]),
-        ],
-        DietaryPreference.vegan: [
-            ("Breakfast", [("oats", "1 cup"), ("berries", "1 cup"), ("almonds", "1 oz")]),
-            ("Lunch", [("lentils", "1 cup"), ("quinoa", "1 cup"), ("spinach", "1 cup")]),
-            ("Dinner", [("tofu", "150 g"), ("sweet potato", "1 medium"), ("broccoli", "1 cup")]),
-        ],
-        DietaryPreference.pescatarian: [
-            ("Breakfast", [("greek yogurt", "1 cup"), ("berries", "1 cup"), ("oats", "1/2 cup")]),
-            ("Lunch", [("salmon", "120 g"), ("rice", "1 cup"), ("mixed veggies", "1 cup")]),
-            ("Dinner", [("salmon", "150 g"), ("sweet potato", "1 medium"), ("spinach", "1 cup")]),
-        ],
-        DietaryPreference.keto: [
-            ("Breakfast", [("eggs", "2"), ("avocado", "1/2"), ("almonds", "1 oz")]),
-            ("Lunch", [("chicken breast", "150 g"), ("broccoli", "1 cup"), ("avocado", "1/2")]),
-            ("Dinner", [("salmon", "150 g"), ("spinach", "1 cup"), ("broccoli", "1 cup")]),
-        ],
-        DietaryPreference.paleo: [
-            ("Breakfast", [("eggs", "2"), ("sweet potato", "1 small"), ("spinach", "1 cup")]),
-            ("Lunch", [("chicken breast", "150 g"), ("mixed veggies", "1 cup")]),
-            ("Dinner", [("salmon", "150 g"), ("broccoli", "1 cup"), ("sweet potato", "1 medium")]),
-        ],
-    }[req.dietary_preference]
-
-    for day in range(1, days + 1):
-        day_meals: List[Meal] = []
-        for idx in range(req.meals_per_day):
-            name, ingredients_raw = base_meals[idx % len(base_meals)]
-            day_meals.append(
-                Meal(
-                    name=name,
-                    calories=calories_per_meal,
-                    protein_g=protein_per_meal,
-                    carbs_g=carbs_per_meal,
-                    fat_g=fat_per_meal,
-                    ingredients=[Ingredient(name=i_name, quantity=i_qty) for i_name, i_qty in ingredients_raw],
-                )
-            )
-        meals.append(
-            DayPlan(
-                day=day,
-                meals=day_meals,
-                total_calories=calories_per_meal * req.meals_per_day,
-                total_protein_g=protein_per_meal * req.meals_per_day,
-                total_carbs_g=carbs_per_meal * req.meals_per_day,
-                total_fat_g=fat_per_meal * req.meals_per_day,
-            )
-        )
-    return meals
-
-
 def _ollama_generate(text: str, model: str) -> Optional[str]:
     """Call a local Ollama model. Returns raw response text or None on error."""
     url = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
@@ -250,6 +220,48 @@ def _ollama_generate(text: str, model: str) -> Optional[str]:
         return data.get("response")
     except Exception:
         return None
+    
+def _recipe_model_name() -> Optional[str]:
+    return os.getenv("OLLAMA_RECIPE_MODEL") or os.getenv("OLLAMA_MODEL")
+
+def generate_recommendations_with_llm(req: RecommendRequest) -> Optional[List[DishRecommendation]]:
+    model = _recipe_model_name()
+    if not model:
+        return None
+    days = 1 if req.period == RecommendationPeriod.one_day else 7
+    ingredients_txt = ", ".join(req.ingredients) if req.ingredients else "none specified—use pantry-friendly staples that fit the diet"
+    allergies_txt = ", ".join(req.allergies) if req.allergies else "none"
+
+    prompt = f"""
+You are a nutrition chef. Recommend simple dishes ONLY using these ingredients: {ingredients_txt}.
+Diet: {req.dietary_preference.value}. Goal: {req.goal.replace('_',' ')}. Allergies: {allergies_txt}.
+Return JSON: {{"dishes":[{{"day":1,"name":"...","reason":"...","ingredients_used":["..."],"steps":["..."],"calories":500,"protein_g":40,"carbs_g":50,"fat_g":15}}]}}.
+Days: {days}. Keep names short; avoid missing ingredients.
+"""
+    raw = _ollama_generate(prompt, model=model)
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+        dishes: List[DishRecommendation] = []
+        for d in data.get("dishes", []):
+            dishes.append(
+                DishRecommendation(
+                    day=int(d.get("day", 1)),
+                    name=d.get("name", "Dish"),
+                    reason=d.get("reason", ""),
+                    ingredients_used=[str(i) for i in d.get("ingredients_used", []) if i],
+                    steps=[str(s) for s in d.get("steps", []) if s],
+                    calories=d.get("calories"),
+                    protein_g=d.get("protein_g"),
+                    carbs_g=d.get("carbs_g"),
+                    fat_g=d.get("fat_g"),
+                )
+            )
+        return dishes or None
+    except Exception:
+        return None
+
 
 
 def generate_plan_with_llm(req: PlanRequest, targets: dict) -> Optional[List[DayPlan]]:
@@ -393,17 +405,20 @@ def estimate_plan_cost(days: List[DayPlan]) -> Tuple[float, List[str]]:
 @app.post("/plan", response_model=PlanResponse)
 def generate_plan(req: PlanRequest) -> PlanResponse:
     """
-    Generate a meal plan. Tries LLM first (if enabled and configured), else uses the stub.
+    Generate a meal plan via LLM only.
     """
     targets = compute_targets(req)
-    days = generate_plan_with_llm(req, targets) if req.use_llm else None
+    days = generate_plan_with_llm(req, targets)
     if days is None:
-        days = stub_meal_plan(req, targets)
+        raise HTTPException(
+            status_code=503,
+            detail="LLM unavailable or returned invalid plan. Ensure OLLAMA_MODEL is configured and reachable.",
+        )
 
     estimated_cost, unknown = estimate_plan_cost(days)
 
     notes = [
-        "If use_llm=true and a local Ollama model is configured (OLLAMA_MODEL), the plan is generated by the model; otherwise it falls back to the static template.",
+        "Plan generated by LLM (OLLAMA_MODEL).",
         "When product search is available, map each ingredient to real products and prices.",
         "Cost uses data/dummy_catalog.csv; quantities are ignored—replace with real pricing for production.",
     ]
@@ -421,7 +436,39 @@ def generate_plan(req: PlanRequest) -> PlanResponse:
         notes=notes,
     )
 
+@app.post("/recommend", response_model=RecommendationResponse)
+def recommend(req: RecommendRequest) -> RecommendationResponse:
+    ingredients = [i.strip().lower() for i in req.ingredients if i.strip()]
+    clean_req = RecommendRequest(**req.dict())
+    clean_req.ingredients = ingredients
+
+    dishes = generate_recommendations_with_llm(clean_req)
+    if dishes is None:
+        raise HTTPException(
+            status_code=503,
+            detail="LLM unavailable or returned invalid recommendations. Ensure OLLAMA_MODEL is configured and reachable.",
+        )
+
+    notes: List[str] = [f"Generated by model {_recipe_model_name()}."]
+
+    used = set()
+    for d in dishes:
+        used.update([u.lower() for u in d.ingredients_used])
+    unknown = [i for i in ingredients if i not in used]
+
+    return RecommendationResponse(
+        period=req.period,
+        dishes=dishes,
+        unknown_items=unknown,
+        notes=notes,
+    )
+
+
 
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+@app.get("/models")
+def models() -> dict:
+    return {"ollama_model": os.getenv("OLLAMA_MODEL"), "ollama_recipe_model": os.getenv("OLLAMA_RECIPE_MODEL")}
