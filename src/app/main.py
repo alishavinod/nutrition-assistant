@@ -57,11 +57,6 @@ class ActivityLevel(str, Enum):
         }[self]
 
 
-class BudgetPeriod(str, Enum):
-    week = "week"
-    month = "month"
-
-
 class DietaryPreference(str, Enum):
     omnivore = "omnivore"
     non_vegeterian = "omnivore"  # backward compatibility for existing requests
@@ -98,7 +93,6 @@ class PlanRequest(BaseModel):
     dietary_preference: DietaryPreference = DietaryPreference.omnivore
     allergies: List[str] = Field(default_factory=list)
     budget_amount: Optional[float] = Field(None, gt=0)
-    budget_period: BudgetPeriod = BudgetPeriod.week
     meals_per_day: int = Field(3, ge=1, le=6)
     macro_split: MacroSplit = MacroSplit()
     target_calories: Optional[int] = Field(None, gt=800, lt=6000)
@@ -134,7 +128,6 @@ class PlanResponse(BaseModel):
     target_carbs_g: int
     target_fat_g: int
     budget_amount: Optional[float]
-    budget_period: BudgetPeriod
     days: List[DayPlan]
     estimated_cost: Optional[float] = None
     unknown_items: List[str] = Field(default_factory=list)
@@ -242,6 +235,7 @@ def generate_recommendations_with_llm(req: RecommendRequest) -> Optional[List[Di
     if not model:
         return None
     days = 1 if req.period == RecommendationPeriod.one_day else 7
+    needed_dishes = 3 * days
     ingredients_txt = ", ".join(req.ingredients) if req.ingredients else "none specified—use pantry-friendly staples that fit the diet"
     allergies_txt = ", ".join(req.allergies) if req.allergies else "none"
 
@@ -250,7 +244,8 @@ You are a nutrition chef. Recommend simple dishes ONLY using these ingredients: 
 Diet: {req.dietary_preference.value}. Goal: {req.goal.replace('_',' ')}. Allergies: {allergies_txt}.
 Return JSON: {{"dishes":[{{"day":1,"name":"...","reason":"...","ingredients_used":["..."],"steps":["..."],"calories":500,"protein_g":40,"carbs_g":50,"fat_g":15}}]}}.
 Days: {days}. Keep names short; avoid missing ingredients.
-Respond with JSON only, no markdown code fences or extra text.
+Return exactly {needed_dishes} dishes total (3 per day), using day values 1..{days} with three dishes per day.
+Respond with JSON only, no markdown code fences or extra text. Each dish must have 3-8 short steps (one action per step).
 """
     raw = _ollama_generate(prompt, model=model)
     if not raw:
@@ -261,19 +256,29 @@ Respond with JSON only, no markdown code fences or extra text.
             return None
         dishes: List[DishRecommendation] = []
         for d in data.get("dishes", []):
+            raw_steps = [str(s) for s in d.get("steps", []) if s]
+            if len(raw_steps) == 1:
+                # Try splitting a single long step into sentences.
+                parts = [p.strip() for p in raw_steps[0].replace("\n", " ").split(". ") if p.strip()]
+                if len(parts) >= 2:
+                    raw_steps = parts[:8]
             dishes.append(
                 DishRecommendation(
                     day=int(d.get("day", 1)),
                     name=d.get("name", "Dish"),
                     reason=d.get("reason", ""),
                     ingredients_used=[str(i) for i in d.get("ingredients_used", []) if i],
-                    steps=[str(s) for s in d.get("steps", []) if s],
+                    steps=raw_steps,
                     calories=d.get("calories"),
                     protein_g=d.get("protein_g"),
                     carbs_g=d.get("carbs_g"),
                     fat_g=d.get("fat_g"),
                 )
             )
+        if len(dishes) < needed_dishes:
+            return None
+        if len(dishes) > needed_dishes:
+            dishes = dishes[:needed_dishes]
         return dishes or None
     except Exception:
         return None
@@ -289,7 +294,7 @@ def generate_plan_with_llm(req: PlanRequest, targets: dict) -> Optional[List[Day
     if not model:
         return None
 
-    days = 7 if req.budget_period == BudgetPeriod.week else 30
+    days = 7
     prompt = f"""
 You are a nutrition planner. Given calories and macro targets, dietary preferences, allergies, meals per day,
 and budget period, produce a JSON object with a list of days. Each day has: day (int), meals (list of meals),
@@ -309,6 +314,7 @@ Constraints:
 - meals per day: {req.meals_per_day}
 - days: {days}
 - keep ingredient names simple (e.g., "chicken breast", "rice", "broccoli")
+- each day must have exactly {req.meals_per_day} meals; add or trim to hit this count
 - respond with JSON only, no markdown code fences or extra text
 
 Return only JSON like:
@@ -360,14 +366,22 @@ Return only JSON like:
                         ingredients=ing_objs,
                     )
                 )
+            if len(meals) < req.meals_per_day:
+                return None
+            if len(meals) > req.meals_per_day:
+                meals = meals[: req.meals_per_day]
+            total_calories = sum(m.calories for m in meals)
+            total_protein_g = sum(m.protein_g for m in meals)
+            total_carbs_g = sum(m.carbs_g for m in meals)
+            total_fat_g = sum(m.fat_g for m in meals)
             parsed_days.append(
                 DayPlan(
                     day=int(day.get("day", 0)),
                     meals=meals,
-                    total_calories=int(day.get("total_calories", 0)),
-                    total_protein_g=int(day.get("total_protein_g", 0)),
-                    total_carbs_g=int(day.get("total_carbs_g", 0)),
-                    total_fat_g=int(day.get("total_fat_g", 0)),
+                    total_calories=total_calories,
+                    total_protein_g=total_protein_g,
+                    total_carbs_g=total_carbs_g,
+                    total_fat_g=total_fat_g,
                 )
             )
         return parsed_days if parsed_days else None
@@ -448,7 +462,6 @@ def generate_plan(req: PlanRequest) -> PlanResponse:
         target_carbs_g=targets["carbs_g"],
         target_fat_g=targets["fat_g"],
         budget_amount=req.budget_amount,
-        budget_period=req.budget_period,
         days=days,
         estimated_cost=round(estimated_cost, 2) if estimated_cost else None,
         unknown_items=unknown,
