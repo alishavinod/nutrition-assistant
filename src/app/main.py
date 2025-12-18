@@ -10,6 +10,7 @@ Features:
 import json
 import os
 import csv
+import re
 from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -18,6 +19,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, validator
 import requests
+
+from .rag_service import RagService, load_seed_documents
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -32,6 +35,25 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+def _init_rag() -> None:
+    """
+    Initialize RAG service and auto-ingest seed docs/CSVs once.
+    Safe to continue without RAG if dependencies are missing.
+    """
+    try:
+        rag = RagService(ROOT_DIR / "data" / "chroma")
+        seed_docs = load_seed_documents(ROOT_DIR)
+        if rag.is_empty() and seed_docs:
+            rag.ingest_documents(seed_docs)
+        app.state.rag = rag
+        app.state.rag_seed_count = len(seed_docs)
+    except Exception as exc:
+        app.state.rag = None
+        app.state.rag_seed_count = 0
+        app.state.rag_error = str(exc)
 
 
 class Sex(str, Enum):
@@ -59,7 +81,7 @@ class ActivityLevel(str, Enum):
 
 class DietaryPreference(str, Enum):
     omnivore = "omnivore"
-    non_vegeterian = "omnivore"  # backward compatibility for existing requests
+    non_vegeterian = "omnivore"
     vegetarian = "vegetarian"
     vegan = "vegan"
     pescatarian = "pescatarian"
@@ -160,17 +182,31 @@ class DishRecommendation(BaseModel):
 
 class RecommendRequest(BaseModel):
     ingredients: List[str] = Field(default_factory=list)
+    profile: Optional[Profile] = None
     dietary_preference: DietaryPreference = DietaryPreference.omnivore
     goal: Goal = Goal.maintenance
     allergies: List[str] = Field(default_factory=list)
     period: RecommendationPeriod = RecommendationPeriod.one_day
     meals_per_day: int = Field(3, ge=1, le=6)
+    macro_split: MacroSplit = MacroSplit()
+    target_calories: Optional[int] = Field(None, gt=800, lt=6000)
+    budget_amount: Optional[float] = Field(None, gt=0)
 
 class RecommendationResponse(BaseModel):
     period: RecommendationPeriod
     dishes: List[DishRecommendation]
     unknown_items: List[str] = Field(default_factory=list)
     notes: List[str] = Field(default_factory=list)
+
+
+class RagIngestRequest(BaseModel):
+    texts: List[str]
+    metadata: Optional[List[dict]] = None
+
+
+class RagQueryRequest(BaseModel):
+    question: str
+    k: int = Field(4, ge=1, le=10)
 
 
 
@@ -187,6 +223,28 @@ def compute_targets(req: PlanRequest) -> dict:
     protein_cal = calories * (req.macro_split.protein_pct / 100)
     carbs_cal = calories * (req.macro_split.carbs_pct / 100)
     fat_cal = calories * (req.macro_split.fat_pct / 100)
+
+    return {
+        "calories": calories,
+        "protein_g": int(protein_cal / 4),
+        "carbs_g": int(carbs_cal / 4),
+        "fat_g": int(fat_cal / 9),
+    }
+
+
+def compute_recommendation_targets(
+    profile: Profile, macro_split: MacroSplit, target_calories: Optional[int]
+) -> dict:
+    """
+    Compute calorie/macro targets for recommendations using the same logic as plans.
+    """
+    bmr = mifflin_st_jeor(profile)
+    tdee = bmr * profile.activity_level.multiplier
+    calories = int(target_calories or round(tdee))
+
+    protein_cal = calories * (macro_split.protein_pct / 100)
+    carbs_cal = calories * (macro_split.carbs_pct / 100)
+    fat_cal = calories * (macro_split.fat_pct / 100)
 
     return {
         "calories": calories,
@@ -227,6 +285,33 @@ def _parse_json_block(raw: str) -> Optional[dict]:
         except Exception:
             return None
     return None
+
+def _normalize_steps(raw_steps: List[str]) -> List[str]:
+    """
+    Flatten and split steps when the model returns multiple sentences/numbered steps in a single entry.
+    Keeps ordering while splitting on newlines, numbered prefixes, and sentence boundaries.
+    """
+    steps: List[str] = []
+    for entry in raw_steps:
+        text = " ".join(str(entry).replace("\n", " ").split())
+        if not text:
+            continue
+        text = re.sub(r"\s*\d+\.\s+", "\n", text)
+        text = text.replace("; ", "\n")
+        parts = re.split(r"\n|(?<=[.!?])\s+(?=[A-Z])", text)
+        for part in parts:
+            clean = part.strip(" -")
+            if clean:
+                steps.append(clean)
+    cleaned: List[str] = []
+    for s in steps:
+        txt = re.sub(r"[\\s.;,:-]+$", "", s).strip()
+        if not txt:
+            continue
+        if txt[-1] not in ".!?":
+            txt = f"{txt}."
+        cleaned.append(txt)
+    return cleaned[:8] if cleaned else raw_steps
     
 def _recipe_model_name() -> Optional[str]:
     return os.getenv("OLLAMA_RECIPE_MODEL") or os.getenv("OLLAMA_MODEL")
@@ -239,12 +324,43 @@ def generate_recommendations_with_llm(req: RecommendRequest) -> Optional[List[Di
     needed_dishes = req.meals_per_day * days
     ingredients_txt = ", ".join(req.ingredients) if req.ingredients else "none specified—use pantry-friendly staples that fit the diet"
     allergies_txt = ", ".join(req.allergies) if req.allergies else "none"
+    budget_txt = f"${req.budget_amount:.2f} total" if req.budget_amount else "no budget provided"
+    budget_per_day = (
+        f"~${(req.budget_amount or 0)/days:.2f} per day" if req.budget_amount else "flexible per-day budget"
+    )
+    profile_txt = "no profile provided"
+    targets_txt = "keep meals balanced and macro-aware"
+    if req.profile:
+        targets = compute_recommendation_targets(req.profile, req.macro_split, req.target_calories)
+        profile_txt = (
+            f"{req.profile.sex}, {req.profile.age}y, {req.profile.height_cm}cm, "
+            f"{req.profile.weight_kg}kg, activity {req.profile.activity_level.value}"
+        )
+        targets_txt = (
+            f"calories ~{targets['calories']} kcal/day, macros P:{targets['protein_g']}g "
+            f"C:{targets['carbs_g']}g F:{targets['fat_g']}g (from split "
+            f"{req.macro_split.protein_pct}/{req.macro_split.carbs_pct}/{req.macro_split.fat_pct})"
+        )
+
+    rag_ctx = ""
+    rag_sources: List[dict] = []
+    rag_service: Optional[RagService] = getattr(app.state, "rag", None)  # type: ignore[attr-defined]
+    if rag_service:
+        query = (
+            f"Ingredients: {ingredients_txt}. Diet: {req.dietary_preference.value}. "
+            f"Goal: {req.goal}. Profile: {profile_txt}. Targets: {targets_txt}."
+        )
+        rag_ctx, rag_sources = rag_service.search_context(query, k=6)
 
     prompt = f"""
 You are a nutrition chef. Recommend simple dishes ONLY using these ingredients: {ingredients_txt}.
 Diet: {req.dietary_preference.value}. Goal: {req.goal.replace('_',' ')}. Allergies: {allergies_txt}.
+User profile: {profile_txt}. Targets: {targets_txt}. Budget: {budget_txt} ({budget_per_day}); favor affordable ingredients.
+Use this nutrition context (prioritize these ingredients/macros if relevant):
+{rag_ctx if rag_ctx else "No context provided; rely on general nutrition knowledge."}
 Return JSON: {{"dishes":[{{"day":1,"name":"...","reason":"...","ingredients_used":["..."],"steps":["..."],"calories":500,"protein_g":40,"carbs_g":50,"fat_g":15}}]}}.
-Days: {days}. Keep names short; avoid missing ingredients.
+Days: {days}. Give specific dish names (e.g., "Spinach Feta Omelette", "Chipotle Chicken Wrap")—no generic "Morning/Lunch/Evening".
+If meals_per_day is 3, treat them as Breakfast, Lunch, Dinner in order; otherwise, rotate meal types and diversify cuisines (no all-breakfast set).
 Return exactly {needed_dishes} dishes total ({req.meals_per_day} per day), using day values 1..{days} with {req.meals_per_day} dishes per day.
 Respond with JSON only, no markdown code fences or extra text. Each dish must have 3-8 short steps (one action per step).
 """
@@ -257,12 +373,7 @@ Respond with JSON only, no markdown code fences or extra text. Each dish must ha
             return None
         dishes: List[DishRecommendation] = []
         for d in data.get("dishes", []):
-            raw_steps = [str(s) for s in d.get("steps", []) if s]
-            if len(raw_steps) == 1:
-                # Try splitting a single long step into sentences.
-                parts = [p.strip() for p in raw_steps[0].replace("\n", " ").split(". ") if p.strip()]
-                if len(parts) >= 2:
-                    raw_steps = parts[:8]
+            raw_steps = _normalize_steps([str(s) for s in d.get("steps", []) if s])
             dishes.append(
                 DishRecommendation(
                     day=int(d.get("day", 1)),
@@ -516,6 +627,27 @@ def recommend(req: RecommendRequest) -> RecommendationResponse:
         unknown_items=unknown,
         notes=notes,
     )
+
+
+@app.post("/rag/ingest")
+def rag_ingest(req: RagIngestRequest) -> dict:
+    rag: Optional[RagService] = getattr(app.state, "rag", None)
+    if not rag:
+        raise HTTPException(status_code=503, detail="RAG service unavailable; check dependencies.")
+    count = rag.ingest_texts(req.texts, req.metadata)
+    return {"chunks_ingested": count}
+
+
+@app.post("/rag/query")
+def rag_query(req: RagQueryRequest) -> dict:
+    rag: Optional[RagService] = getattr(app.state, "rag", None)
+    if not rag:
+        raise HTTPException(status_code=503, detail="RAG service unavailable; check dependencies.")
+    prompt, sources = rag.build_prompt(req.question, k=req.k)
+    raw = _ollama_generate(prompt, model=_recipe_model_name() or os.getenv("OLLAMA_MODEL"))
+    if not raw:
+        raise HTTPException(status_code=503, detail="LLM unavailable for RAG response.")
+    return {"answer": raw, "sources": sources}
 
 
 
