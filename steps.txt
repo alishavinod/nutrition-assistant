@@ -1,5 +1,9 @@
 
 
+export HF_MODEL_ID=flax-community/t5-recipe-generation
+export HF_DEVICE=cuda
+
+
 Set up deps: 
 python3 -m pip install -r requirements.txt
 

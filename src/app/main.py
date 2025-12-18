@@ -20,6 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, validator
 import requests
 
+from .providers.hf_recipes import generate_hf_recipes
 from .rag_service import RagService, load_seed_documents
 
 
@@ -316,10 +317,202 @@ def _normalize_steps(raw_steps: List[str]) -> List[str]:
 def _recipe_model_name() -> Optional[str]:
     return os.getenv("OLLAMA_RECIPE_MODEL") or os.getenv("OLLAMA_MODEL")
 
-def generate_recommendations_with_llm(req: RecommendRequest) -> Optional[List[DishRecommendation]]:
+
+def _fallback_recommendations(req: RecommendRequest) -> List[DishRecommendation]:
+    """
+    Deterministic, allergy-aware suggestions when both Hugging Face and Ollama are unavailable.
+    Keeps the endpoint responsive for demo purposes.
+    """
+    days = 1 if req.period == RecommendationPeriod.one_day else 7
+    needed_dishes = days * req.meals_per_day
+    staples = {
+        DietaryPreference.omnivore: ["chicken", "rice", "beans", "eggs", "spinach"],
+        DietaryPreference.vegetarian: ["tofu", "quinoa", "beans", "eggs", "spinach"],
+        DietaryPreference.vegan: ["tofu", "quinoa", "beans", "lentils", "spinach"],
+        DietaryPreference.pescatarian: ["salmon", "rice", "beans", "spinach", "eggs"],
+        DietaryPreference.keto: ["chicken", "cauliflower", "eggs", "avocado", "spinach"],
+        DietaryPreference.paleo: ["chicken", "sweet potato", "eggs", "spinach", "nuts"],
+    }
+
+    def _safe(x: str) -> bool:
+        return not any(a.lower() in x.lower() for a in req.allergies)
+
+    pantry = [i for i in req.ingredients if _safe(i)] or [
+        i for i in staples.get(req.dietary_preference, staples[DietaryPreference.omnivore]) if _safe(i)
+    ]
+    styles = ["bowl", "skillet", "salad", "wrap", "scramble", "soup", "bake"]
+
+    dishes: List[DishRecommendation] = []
+    for idx in range(needed_dishes):
+        ing = pantry[idx % len(pantry)]
+        style = styles[idx % len(styles)]
+        dishes.append(
+            DishRecommendation(
+                day=(idx // req.meals_per_day) + 1,
+                name=f"{ing.title()} {style.title()}",
+                reason=f"Uses available ingredient '{ing}' and fits {req.dietary_preference.value} diet.",
+                ingredients_used=[ing],
+                steps=[
+                    f"Prep {ing} with salt, pepper, and any preferred herbs.",
+                    f"Cook the {ing} in a pan or oven until done.",
+                    "Add a quick veggie side or greens if available.",
+                    "Serve immediately; pack leftovers for the next meal.",
+                ],
+                calories=None,
+                protein_g=None,
+                carbs_g=None,
+                fat_g=None,
+            )
+        )
+    return dishes
+
+
+def _hf_generation_settings() -> dict:
+    """
+    Default generation knobs aligned with the model card for flax-community/t5-recipe-generation.
+    Keep these modest to avoid runaway responses when running on CPU.
+    """
+    return {
+        "max_length": 512,
+        "min_length": 64,
+        "no_repeat_ngram_size": 3,
+        "do_sample": True,
+        "top_k": 60,
+        "top_p": 0.95,
+    }
+
+
+def _hf_clean_recipe_text(text: str) -> str:
+    """
+    Apply the token replacements described in the model card to produce readable text.
+    """
+    replacements = {"<sep>": "--", "<section>": "\n", "</s>": "", "<pad>": ""}
+    cleaned = text
+    for token, val in replacements.items():
+        cleaned = cleaned.replace(token, val)
+    return cleaned.strip()
+
+
+def _parse_hf_recipe(text: str) -> Tuple[str, List[str], List[str]]:
+    """
+    Parse the text output from the HF recipe model into title, ingredients, and steps.
+    Ingredients and steps are delimited by '--' after cleaning.
+    """
+    cleaned = _hf_clean_recipe_text(text)
+    title = "Recipe"
+    ingredients: List[str] = []
+    steps: List[str] = []
+    for line in cleaned.splitlines():
+        if not line.strip():
+            continue
+        lowered = line.lower()
+        if lowered.startswith("title:"):
+            title = line.split(":", 1)[1].strip().title() or title
+        elif lowered.startswith("ingredients:"):
+            raw = line.split(":", 1)[1]
+            ingredients.extend([p.strip(" -") for p in raw.split("--") if p.strip()])
+        elif lowered.startswith("directions:") or lowered.startswith("steps:"):
+            raw = line.split(":", 1)[1]
+            steps.extend([p.strip(" -") for p in raw.split("--") if p.strip()])
+    # Fallback: if steps were not captured but the text has '--', treat them as steps.
+    if not steps and "--" in cleaned:
+        steps = [p.strip(" -") for p in cleaned.split("--") if p.strip()]
+    return title, ingredients, steps
+
+
+def _ingredient_pool(req: RecommendRequest) -> List[str]:
+    """
+    Build a pool of safe ingredients honoring dietary preference and allergies.
+    """
+    staples = {
+        DietaryPreference.omnivore: ["chicken", "rice", "beans", "eggs", "spinach"],
+        DietaryPreference.vegetarian: ["tofu", "quinoa", "beans", "eggs", "spinach"],
+        DietaryPreference.vegan: ["tofu", "quinoa", "beans", "lentils", "spinach"],
+        DietaryPreference.pescatarian: ["salmon", "rice", "beans", "spinach", "eggs"],
+        DietaryPreference.keto: ["chicken", "cauliflower", "eggs", "avocado", "spinach"],
+        DietaryPreference.paleo: ["chicken", "sweet potato", "eggs", "spinach", "nuts"],
+    }
+
+    def _safe(x: str) -> bool:
+        return not any(a.lower() in x.lower() for a in req.allergies)
+
+    pool = [i for i in req.ingredients if _safe(i)]
+    if pool:
+        return pool
+    return [i for i in staples.get(req.dietary_preference, staples[DietaryPreference.omnivore]) if _safe(i)]
+
+
+def _generate_recommendations_with_hf(req: RecommendRequest) -> Optional[List[DishRecommendation]]:
+    """
+    Generate dishes using the Hugging Face recipe model (HF_MODEL_ID).
+    Returns None if the model is not configured or generation fails.
+    """
+    if not os.getenv("HF_MODEL_ID"):
+        return None
+
+    days = 1 if req.period == RecommendationPeriod.one_day else 7
+    needed_dishes = req.meals_per_day * days
+    pantry = _ingredient_pool(req)
+
+    prompts: List[str] = []
+    for idx in range(needed_dishes):
+        window = pantry[idx : idx + 3] or pantry
+        prompts.append(f"items: {', '.join(window)}")
+
+    raw_recipes = generate_hf_recipes(prompts, **_hf_generation_settings())
+    if not raw_recipes:
+        return None
+
+    dishes: List[DishRecommendation] = []
+    for idx, text in enumerate(raw_recipes[:needed_dishes]):
+        title, ingredients, steps = _parse_hf_recipe(text)
+        dishes.append(
+            DishRecommendation(
+                day=(idx // req.meals_per_day) + 1,
+                name=title or f"Dish {idx + 1}",
+                reason="Generated by Hugging Face model.",
+                ingredients_used=ingredients or prompts[idx].replace("items:", "").split(","),
+                steps=_normalize_steps(steps or ["Prep ingredients", "Cook until done", "Serve hot"]),
+                calories=None,
+                protein_g=None,
+                carbs_g=None,
+                fat_g=None,
+            )
+        )
+
+    # Ensure we return exactly the requested count.
+    while len(dishes) < needed_dishes and dishes:
+        src = dishes[len(dishes) % len(dishes)]
+        dishes.append(
+            DishRecommendation(
+                day=(len(dishes) // req.meals_per_day) + 1,
+                name=src.name,
+                reason=src.reason,
+                ingredients_used=src.ingredients_used,
+                steps=src.steps,
+                calories=src.calories,
+                protein_g=src.protein_g,
+                carbs_g=src.carbs_g,
+                fat_g=src.fat_g,
+            )
+        )
+    if len(dishes) > needed_dishes:
+        dishes = dishes[:needed_dishes]
+    return dishes
+
+
+def generate_recommendations_with_llm(req: RecommendRequest) -> Tuple[Optional[List[DishRecommendation]], str]:
+    """
+    Try Hugging Face first, then Ollama. Returns dishes and a provider label for notes.
+    Provider label: "huggingface:<model>" | "ollama:<model>" | "".
+    """
+    hf_dishes = _generate_recommendations_with_hf(req)
+    if hf_dishes:
+        return hf_dishes, f"huggingface:{os.getenv('HF_MODEL_ID')}"
+
     model = _recipe_model_name()
     if not model:
-        return None
+        return None, ""
     days = 1 if req.period == RecommendationPeriod.one_day else 7
     needed_dishes = req.meals_per_day * days
     ingredients_txt = ", ".join(req.ingredients) if req.ingredients else "none specified—use pantry-friendly staples that fit the diet"
@@ -366,11 +559,11 @@ Respond with JSON only, no markdown code fences or extra text. Each dish must ha
 """
     raw = _ollama_generate(prompt, model=model)
     if not raw:
-        return None
+        return None, ""
     try:
         data = _parse_json_block(raw)
         if not data:
-            return None
+            return None, ""
         dishes: List[DishRecommendation] = []
         for d in data.get("dishes", []):
             raw_steps = _normalize_steps([str(s) for s in d.get("steps", []) if s])
@@ -388,7 +581,7 @@ Respond with JSON only, no markdown code fences or extra text. Each dish must ha
                 )
             )
         if not dishes:
-            return None
+            return None, ""
         # Normalize to exactly needed_dishes (meals_per_day per day); pad by cycling existing dishes if short.
         if len(dishes) < needed_dishes:
             base = dishes[:]
@@ -412,9 +605,9 @@ Respond with JSON only, no markdown code fences or extra text. Each dish must ha
         # Ensure day labels cycle correctly (meals_per_day dishes per day).
         for idx, dish in enumerate(dishes):
             dish.day = (idx // req.meals_per_day) + 1
-        return dishes
+        return dishes, f"ollama:{model}"
     except Exception:
-        return None
+        return None, ""
 
 
 
@@ -607,14 +800,21 @@ def recommend(req: RecommendRequest) -> RecommendationResponse:
     clean_req = RecommendRequest(**req.dict())
     clean_req.ingredients = ingredients
 
-    dishes = generate_recommendations_with_llm(clean_req)
+    dishes, provider = generate_recommendations_with_llm(clean_req)
+    fallback_used = False
     if dishes is None:
-        raise HTTPException(
-            status_code=503,
-            detail="LLM unavailable or returned invalid recommendations. Ensure OLLAMA_MODEL/OLLAMA_RECIPE_MODEL is configured and reachable.",
-        )
+        dishes = _fallback_recommendations(clean_req)
+        fallback_used = True
 
-    notes: List[str] = [f"Generated by model {_recipe_model_name()}."]
+    notes: List[str] = []
+    if provider and not fallback_used:
+        notes.append(f"Generated by {provider}.")
+    elif _recipe_model_name() and not fallback_used:
+        notes.append(f"Generated by model {_recipe_model_name()}.")
+    elif os.getenv("HF_MODEL_ID") and not fallback_used:
+        notes.append(f"Generated by Hugging Face model {os.getenv('HF_MODEL_ID')}.")
+    if fallback_used:
+        notes.append("LLM unavailable; served deterministic fallback suggestions.")
 
     used = set()
     for d in dishes:
@@ -657,4 +857,8 @@ def health() -> dict:
 
 @app.get("/models")
 def models() -> dict:
-    return {"ollama_model": os.getenv("OLLAMA_MODEL"), "ollama_recipe_model": os.getenv("OLLAMA_RECIPE_MODEL")}
+    return {
+        "ollama_model": os.getenv("OLLAMA_MODEL"),
+        "ollama_recipe_model": os.getenv("OLLAMA_RECIPE_MODEL"),
+        "hf_model_id": os.getenv("HF_MODEL_ID"),
+    }
