@@ -7,8 +7,8 @@ from typing import Iterable, List, Optional
 import pandas as pd
 from langchain_core.documents import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import Chroma
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_chroma import Chroma
 
 
 def _read_text_file(path: Path) -> Optional[str]:

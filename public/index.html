@@ -7,48 +7,51 @@
   <style>
     :root { --bg: #0c1220; --card: #141c2c; --accent: #4fd1c5; --text: #e8edf6; --muted: #9aa7bf; }
     body { margin: 0; font-family: 'Inter', system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); display: flex; justify-content: center; padding: 24px; }
-    .container { width: min(1100px, 100%); }
+    .container { width: min(1200px, 100%); }
     h1 { margin: 0 0 8px; }
     p { color: var(--muted); margin: 0 0 16px; }
     .card { background: var(--card); border: 1px solid #1f2a40; border-radius: 14px; padding: 16px; margin-bottom: 16px; box-shadow: 0 10px 40px rgba(0,0,0,0.25); }
-    .card .card { background: #10182a; border-color: #1b2538; }
     form { display: grid; grid-template-columns: repeat(auto-fit,minmax(240px,1fr)); gap: 12px; }
     label { display: flex; flex-direction: column; font-size: 14px; gap: 6px; }
     input, select { padding: 10px; border-radius: 10px; border: 1px solid #1f2a40; background: #10182a; color: var(--text); }
-    button { background: var(--accent); color: #0c1220; border: none; padding: 12px 16px; border-radius: 10px; font-weight: 600; cursor: pointer; width: 200px; }
+    button { background: var(--accent); color: #0c1220; border: none; padding: 12px 16px; border-radius: 10px; font-weight: 600; cursor: pointer; }
     button:disabled { opacity: 0.6; cursor: not-allowed; }
-    .actions { display: flex; gap: 12px; align-items: center; margin-top: 12px; }
-    pre { background: #0d1424; border: 1px solid #1f2a40; padding: 14px; border-radius: 12px; color: #cbd5e1; overflow: auto; max-height: 420px; }
-    .tag { display: inline-block; background: #1f2a40; color: var(--muted); padding: 4px 8px; border-radius: 8px; font-size: 12px; margin-right: 6px; }
+    .actions { display: flex; gap: 12px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+    .tag { display: inline-block; background: #1f2a40; color: var(--muted); padding: 4px 8px; border-radius: 8px; font-size: 12px; }
+    .dish-card { background: #10182a; border: 1px solid #1b2538; border-radius: 12px; padding: 12px; margin-bottom: 12px; }
+    .upload { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    pre { background: #0d1424; border: 1px solid #1f2a40; padding: 12px; border-radius: 10px; color: #cbd5e1; overflow: auto; max-height: 320px; }
   </style>
 </head>
 <body>
   <div class="container">
     <div class="card">
       <h1>Nutrition Planner</h1>
-      <p>Backend defaults to <code>http://localhost:8000</code>. Enable LLM if you have Ollama running and <code>OLLAMA_MODEL</code> set.</p>
-      <label>Backend URL
-        <input id="backend" value="http://localhost:8000" />
-      </label>
+      <p>Set your backend and pick a model; defaults to <code>http://localhost:8000</code>.</p>
+      <form>
+        <label>Backend URL
+          <input id="backend" value="http://localhost:8000" />
+        </label>
+        <label>Model (Hugging Face, OpenAI, or Ollama)
+          <select id="model_id">
+            <option value="">Use backend default</option>
+          </select>
+        </label>
+      </form>
+      <div class="actions">
+        <span id="status" class="tag">Idle</span>
+        <span id="model-used" class="tag">Model: (not selected)</span>
+      </div>
     </div>
 
     <div class="card">
       <div class="tag">Profile & Preferences</div>
       <form id="planner-form">
-        <label>Height (cm)
-          <input id="height_cm" type="number" value="175" required />
-        </label>
-        <label>Weight (kg)
-          <input id="weight_kg" type="number" value="70" required />
-        </label>
-        <label>Age
-          <input id="age" type="number" value="30" required />
-        </label>
+        <label>Height (cm)<input id="height_cm" type="number" value="175" required /></label>
+        <label>Weight (kg)<input id="weight_kg" type="number" value="70" required /></label>
+        <label>Age<input id="age" type="number" value="30" required /></label>
         <label>Sex
-          <select id="sex">
-            <option value="male">Male</option>
-            <option value="female">Female</option>
-          </select>
+          <select id="sex"><option value="male">Male</option><option value="female">Female</option></select>
         </label>
         <label>Activity
           <select id="activity">
@@ -69,12 +72,8 @@
             <option value="paleo">Paleo</option>
           </select>
         </label>
-        <label>Meals per day
-          <input id="meals_per_day" type="number" min="1" max="6" value="3" />
-        </label>
-        <label>Budget amount
-          <input id="budget_amount" type="number" step="0.01" value="100" />
-        </label>
+        <label>Meals per day<input id="meals_per_day" type="number" min="1" max="6" value="3" /></label>
+        <label>Budget amount<input id="budget_amount" type="number" step="0.01" value="100" /></label>
         <label>Goal
           <select id="goal">
             <option value="fat_loss">Fat loss</option>
@@ -82,9 +81,18 @@
             <option value="maintenance" selected>Maintenance</option>
           </select>
         </label>
-        <label>Allergies (comma separated)
-          <input id="allergies" placeholder="peanut, dairy" />
+        <label>Cuisine
+          <select id="cuisine">
+            <option value="">Any</option>
+            <option value="italian">Italian</option>
+            <option value="indian">Indian</option>
+            <option value="mexican">Mexican</option>
+            <option value="thai">Thai</option>
+            <option value="japanese">Japanese</option>
+            <option value="mediterranean">Mediterranean</option>
+          </select>
         </label>
+        <label>Allergies (comma separated)<input id="allergies" placeholder="peanut, dairy" /></label>
         <label>Recommendation period
           <select id="period">
             <option value="one_day">1 day</option>
@@ -94,20 +102,52 @@
       </form>
       <div class="actions">
         <button id="recommend">Recommend Dishes</button>
-        <span id="status" class="tag">Idle</span>
       </div>
+    </div>
+
+    <div class="card">
+      <div class="tag">Targets & Model</div>
+      <div id="target-summary">Provide profile info and run recommendations to see targets.</div>
     </div>
 
     <div class="card">
       <div class="tag">Dish Recommendations</div>
       <div id="dish-cards">Waiting for recommendations...</div>
     </div>
+
+    <div class="card">
+      <div class="tag">Refine Recommendations (chat-style)</div>
+      <div class="actions">
+        <input id="refine-input" placeholder="E.g., prefer yogurt over oats, avoid almonds" style="flex:1; min-width: 300px; padding:10px; border-radius:10px; border:1px solid #1f2a40; background:#10182a; color:var(--text);" />
+        <button id="refine-btn" type="button">Refine</button>
+      </div>
+      <div id="refine-status" class="tag">Idle</div>
+    </div>
+
+    <div class="card">
+      <div class="tag">Image to Recipe (placeholder)</div>
+      <div class="upload">
+        <input type="file" id="image-file" accept="image/*" />
+        <button id="upload-btn" type="button">Upload &amp; Describe</button>
+        <span id="upload-status" class="tag">Idle</span>
+      </div>
+      <pre id="upload-output">No image uploaded.</pre>
+    </div>
   </div>
 
   <script>
     const statusEl = document.getElementById('status');
-    const setStatus = (txt) => { statusEl.textContent = txt; };
+    const modelUsedEl = document.getElementById('model-used');
+    const setStatus = (txt) => { if (statusEl) statusEl.textContent = txt; };
+    const refineInput = document.getElementById('refine-input');
+    const refineBtn = document.getElementById('refine-btn');
+    const refineStatus = document.getElementById('refine-status');
     const dishCards = document.getElementById('dish-cards');
+    const targetSummary = document.getElementById('target-summary');
+    const modelSelect = document.getElementById('model_id');
+    let currentController = null;
+    let lastRecommendPayload = null;
+    let lastDishes = null;
 
     function renderDishes(res) {
       if (!dishCards) return;
@@ -118,7 +158,7 @@
       dishCards.innerHTML = '';
       res.dishes.forEach(d => {
         const card = document.createElement('div');
-        card.className = 'card';
+        card.className = 'dish-card';
         card.innerHTML = `
           <div class="tag">Day ${d.day}</div>
           <h3>${d.name}</h3>
@@ -131,34 +171,112 @@
       });
     }
 
+    function renderTargets(res) {
+      if (!targetSummary) return;
+      if (!res) {
+        targetSummary.textContent = 'No target data.';
+        return;
+      }
+      const model = res.model_provider || 'unknown';
+      const params = res.model_parameters ? `${res.model_parameters.toLocaleString()} params` : '';
+      if (!res.target_calories) {
+        targetSummary.innerHTML = `
+          <p>Model: <strong>${model}</strong>${params ? ` (${params})` : ''}</p>
+          <p>No profile provided, so targets are not calculated.</p>
+        `;
+        return;
+      }
+      targetSummary.innerHTML = `
+        <p>Model: <strong>${model}</strong>${params ? ` (${params})` : ''}</p>
+        <p>Daily targets: ${res.target_calories} kcal, Protein ${res.target_protein_g}g, Carbs ${res.target_carbs_g}g, Fat ${res.target_fat_g}g</p>
+      `;
+    }
+
+    async function loadModelOptions(backend) {
+      if (!modelSelect) return;
+      try {
+        const previous = modelSelect.value;
+        const resp = await fetch(`${backend}/models`);
+        const data = await resp.json();
+        const optionMap = new Map();
+        const addOption = (value, label) => {
+          if (!value) return;
+          const key = `${label}:${value}`;
+          if (!optionMap.has(key)) optionMap.set(key, { value: key, text: `[${label}] ${value}` });
+        };
+        (data.hf_models || []).forEach(m => addOption(m, 'hf'));
+        (data.openai_models || []).forEach(m => addOption(m, 'openai'));
+        (data.ollama_models || []).forEach(m => addOption(m, 'ollama'));
+        addOption(data.hf_model_id, 'hf');
+        addOption(data.openai_model, 'openai');
+        addOption(data.ollama_recipe_model, 'ollama');
+        addOption(data.ollama_model, 'ollama');
+        modelSelect.innerHTML = '<option value="">Use backend default</option>' +
+          Array.from(optionMap.values()).map(o => `<option value="${o.value}">${o.text}</option>`).join('');
+        if (previous && Array.from(optionMap.values()).some(o => o.value === previous)) {
+          modelSelect.value = previous;
+        } else if (data.defaults && data.defaults.openai) {
+          modelSelect.value = `openai:${data.defaults.openai}`;
+        } else if (data.defaults && data.defaults.hf) {
+          modelSelect.value = `hf:${data.defaults.hf}`;
+        } else if (data.defaults && data.defaults.ollama) {
+          modelSelect.value = `ollama:${data.defaults.ollama}`;
+        }
+      } catch (e) {
+        // ignore; still allow manual entry
+      }
+    }
+
     const recommendBtn = document.getElementById('recommend');
+    loadModelOptions(document.getElementById('backend')?.value || 'http://localhost:8000');
     if (recommendBtn) {
       recommendBtn.addEventListener('click', async () => {
+        if (currentController) currentController.abort();
+        const controller = new AbortController();
+        currentController = controller;
         if (dishCards) dishCards.textContent = 'Loading...';
         setStatus('Loading recommend...');
         const backend = document.getElementById('backend').value || 'http://localhost:8000';
+        await loadModelOptions(backend);
+        const profile = {
+          height_cm: Number(document.getElementById('height_cm').value),
+          weight_kg: Number(document.getElementById('weight_kg').value),
+          age: Number(document.getElementById('age').value),
+          sex: document.getElementById('sex').value,
+          activity_level: document.getElementById('activity').value
+        };
         const payload = {
           ingredients: [],
           dietary_preference: document.getElementById('diet').value,
           goal: document.getElementById('goal').value,
+          cuisine: document.getElementById('cuisine').value,
           allergies: document.getElementById('allergies').value.split(',').map(x => x.trim()).filter(Boolean),
           period: document.getElementById('period').value,
-          meals_per_day: Number(document.getElementById('meals_per_day').value)
+          meals_per_day: Number(document.getElementById('meals_per_day').value),
+          profile
         };
+        lastRecommendPayload = payload;
+        const selectedModel = modelSelect ? modelSelect.value : '';
+        const selectedText = modelSelect && modelSelect.options[modelSelect.selectedIndex]
+          ? modelSelect.options[modelSelect.selectedIndex].textContent
+          : '(backend default)';
+        if (selectedModel.startsWith('hf:')) {
+          payload.hf_model_id = selectedModel.replace('hf:', '');
+        } else if (selectedModel.startsWith('ollama:')) {
+          payload.ollama_model = selectedModel.replace('ollama:', '');
+        } else if (selectedModel.startsWith('openai:')) {
+          payload.openai_model = selectedModel.replace('openai:', '');
+        }
+        if (modelUsedEl) modelUsedEl.textContent = `Requested: ${selectedText}`;
         try {
           const resp = await fetch(`${backend}/recommend`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+            body: JSON.stringify(payload),
+            signal: controller.signal,
           });
-          let data;
-          try {
-            data = await resp.json();
-          } catch (e) {
-            dishCards.textContent = `Invalid response: ${e}`;
-            setStatus('Error');
-            return;
-          }
+          const data = await resp.json();
+          if (controller !== currentController || controller.signal.aborted) return;
           if (!resp.ok) {
             const detail = data && (data.detail || data.error || JSON.stringify(data));
             dishCards.textContent = `Error from backend: ${detail}`;
@@ -166,10 +284,88 @@
             return;
           }
           renderDishes(data);
-          setStatus('OK');
+          renderTargets(data);
+          lastDishes = data.dishes || [];
+          lastRecommendPayload = payload;
+          const usedProvider = data.model_provider || 'unknown';
+          if (modelUsedEl) modelUsedEl.textContent = `Used: ${usedProvider}`;
+          setStatus(`OK (${usedProvider})`);
         } catch (err) {
+          if (err && err.name === 'AbortError') return;
           if (dishCards) dishCards.textContent = `Error: ${err}`;
           setStatus('Error');
+        } finally {
+          if (controller === currentController) currentController = null;
+        }
+      });
+    }
+
+    const uploadBtn = document.getElementById('upload-btn');
+    const uploadStatus = document.getElementById('upload-status');
+    const uploadOutput = document.getElementById('upload-output');
+    if (uploadBtn) {
+      uploadBtn.addEventListener('click', async () => {
+        const fileInput = document.getElementById('image-file');
+        if (!fileInput || !fileInput.files || !fileInput.files.length) {
+          if (uploadStatus) uploadStatus.textContent = 'No file selected';
+          return;
+        }
+        const backend = document.getElementById('backend').value || 'http://localhost:8000';
+        const form = new FormData();
+        form.append('file', fileInput.files[0]);
+        const selectedModel = modelSelect ? modelSelect.value : '';
+        if (selectedModel.startsWith('hf:')) {
+          form.append('hf_model_id', selectedModel.replace('hf:', ''));
+        } else if (selectedModel.startsWith('ollama:')) {
+          form.append('ollama_model', selectedModel.replace('ollama:', ''));
+        } else if (selectedModel.startsWith('openai:')) {
+          form.append('openai_model', selectedModel.replace('openai:', ''));
+        }
+        if (uploadStatus) uploadStatus.textContent = 'Uploading...';
+        try {
+          const resp = await fetch(`${backend}/image-recipe`, { method: 'POST', body: form });
+          const data = await resp.json();
+          uploadOutput.textContent = JSON.stringify(data, null, 2);
+          uploadStatus.textContent = resp.ok ? 'Done' : 'Error';
+        } catch (e) {
+          uploadOutput.textContent = `Error: ${e}`;
+          if (uploadStatus) uploadStatus.textContent = 'Error';
+        }
+      });
+    }
+
+    if (refineBtn) {
+      refineBtn.addEventListener('click', async () => {
+        if (!lastDishes || !Array.isArray(lastDishes) || !lastDishes.length) {
+          if (refineStatus) refineStatus.textContent = 'Run recommendations first.';
+          return;
+        }
+        const backend = document.getElementById('backend').value || 'http://localhost:8000';
+        const feedback = refineInput ? refineInput.value : '';
+        if (!feedback.trim()) {
+          if (refineStatus) refineStatus.textContent = 'Enter feedback.';
+          return;
+        }
+        const body = { feedback, dishes: lastDishes, request: lastRecommendPayload || {} };
+        if (refineStatus) refineStatus.textContent = 'Refining...';
+        try {
+          const resp = await fetch(`${backend}/recommend/refine`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+          const data = await resp.json();
+          if (!resp.ok) {
+            const detail = data && (data.detail || data.error || JSON.stringify(data));
+            if (refineStatus) refineStatus.textContent = `Error: ${detail}`;
+            return;
+          }
+          lastDishes = data.dishes || [];
+          renderDishes(data);
+          renderTargets(data);
+          if (refineStatus) refineStatus.textContent = `Refined with ${data.model_provider || 'unknown'}`;
+        } catch (e) {
+          if (refineStatus) refineStatus.textContent = `Error: ${e}`;
+        } finally {
+          if (refineStatus && (!refineStatus.textContent || refineStatus.textContent.startsWith('Refining'))) {
+            refineStatus.textContent = 'Idle';
+          }
         }
       });
     }

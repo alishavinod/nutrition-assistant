@@ -1,4 +1,14 @@
+pip install -r requirements.txt
 
+pip install -U langchain langchain-community langchain-core langsmith langchain-text-splitters
+pip list | grep langchain
+
+
+## for chroma db
+export CHROMADB_TELEMETRY=0
+
+export HF_MODEL_ID=meta-llama/Meta-Llama-3.1-8B-Instruct
+export OLLAMA_MODEL=llama3
 
 export HF_MODEL_ID=flax-community/t5-recipe-generation
 export HF_DEVICE=cuda
@@ -29,9 +39,6 @@ http://localhost:8000
 
 API direct test: 
 curl http://127.0.0.1:8000/health and POST to /plan as in README.
-
-
-
 
 
 
@@ -90,6 +97,8 @@ curl -X POST http://127.0.0.1:8000/plan \
 
 
 ## kill
+
+kill -9 $(lsof -ti tcp:8000)
 
 lsof -i tcp:8000
 kill -9 70510

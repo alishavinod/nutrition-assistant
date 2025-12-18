@@ -1,0 +1,16 @@
+{
+  "huggingface": [
+    "meta-llama/Meta-Llama-Guard-2-8B",
+    "meta-llama/Meta-Llama-3.1-8B-Instruct",
+    "mistralai/Mistral-7B-Instruct-v0.3",
+    "Qwen/Qwen2.5-7B-Instruct"
+  ],
+  "ollama": [
+    "llama3",
+    "llama3:instruct"
+  ],
+  "openai": [
+    "gpt-4.1-mini",
+    "gpt-4o-mini"
+  ]
+}
