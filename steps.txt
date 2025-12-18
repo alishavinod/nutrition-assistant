@@ -89,3 +89,7 @@ curl -X POST http://127.0.0.1:8000/plan \
 
 lsof -i tcp:8000
 kill -9 70510
+
+
+pkill -f uvicorn || true
+pkill -f "src.app.main" || true
