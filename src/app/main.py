@@ -18,12 +18,14 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, validator
 import requests
 
 from .providers.hf_recipes import generate_hf_recipes, get_last_hf_error, get_hf_pipeline
 from .food_image_to_txt import describe_image_from_bytes
 from .rag_service import RagService, load_seed_documents
+from .instacart_hook import create_shopping_list_with_search_links, generate_html_page
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -249,6 +251,17 @@ class DishRecommendation(BaseModel):
     carbs_g: Optional[int] = None
     fat_g: Optional[int] = None
 
+class ShoppingItem(BaseModel):
+    name: str
+    quantity: Optional[float] = None
+    unit: Optional[str] = None
+
+
+class ShoppingLinksRequest(BaseModel):
+    shopping_list: List[ShoppingItem]
+    shopping_links: Optional[dict] = None
+    title: Optional[str] = "LLM Grocery List"
+
 class RecommendRequest(BaseModel):
     ingredients: List[str] = Field(default_factory=list)
     profile: Optional[Profile] = None
@@ -277,6 +290,8 @@ class RecommendationResponse(BaseModel):
     model_provider: Optional[str] = None
     model_parameters: Optional[int] = None
     cuisine: Optional[str] = None
+    shopping_list: Optional[List[ShoppingItem]] = None
+    shopping_links: Optional[dict] = None
 
 
 class RefineRequest(BaseModel):
@@ -340,6 +355,8 @@ def compute_targets(req: PlanRequest) -> dict:
 #     }
 
 
+from typing import Optional, Dict
+
 KCAL_PER_GRAM = {
     "protein": 4,
     "carbs": 4,
@@ -352,6 +369,48 @@ GOAL_CALORIE_MULTIPLIER = {
     "bulk": 1.10,
 }
 
+
+# def compute_recommendation_targets(
+#     profile: Profile,
+#     macro_split: MacroSplit,
+#     target_calories: Optional[int] = None,
+#     goal: Optional[Goal] = Goal.maintenance,
+# ) -> Dict[str, int]:
+#     """
+#     Compute daily calorie and macro targets for recipe / meal recommendations.
+
+#     Output is intentionally minimal and stable so it can be reused
+#     across planners, recommenders, and grocery generators.
+#     """
+
+#     # 1. Base calories
+#     bmr = mifflin_st_jeor(profile)
+#     tdee = bmr * profile.activity_level.multiplier
+
+#     base_calories = target_calories or round(tdee)
+
+#     # 2. Goal adjustment (maintenance / cut / bulk)
+#     goal_label = (goal.value if isinstance(goal, Goal) else goal or "maintenance").lower()
+#     calorie_multiplier = GOAL_CALORIE_MULTIPLIER.get(goal_label, 1.0)
+
+#     calories = int(round(base_calories * calorie_multiplier))
+
+#     # 3. Macro calories
+#     protein_cal = calories * (macro_split.protein_pct / 100)
+#     carbs_cal = calories * (macro_split.carbs_pct / 100)
+#     fat_cal = calories * (macro_split.fat_pct / 100)
+
+#     # 4. Convert to grams
+#     protein_g = round(protein_cal / KCAL_PER_GRAM["protein"])
+#     carbs_g = round(carbs_cal / KCAL_PER_GRAM["carbs"])
+#     fat_g = round(fat_cal / KCAL_PER_GRAM["fat"])
+
+#     return {
+#         "calories": calories,
+#         "protein_g": int(protein_g),
+#         "carbs_g": int(carbs_g),
+#         "fat_g": int(fat_g),
+#     }
 
 def compute_recommendation_targets(
     profile: Profile,
@@ -408,8 +467,6 @@ def compute_recommendation_targets(
         "fat_g": int(round(fat_g)),
     }
 
-
-
 def _ollama_generate(text: str, model: str) -> Optional[str]:
     """Call a local Ollama model. Returns raw response text or None on error."""
     url = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
@@ -465,6 +522,49 @@ def _sanitize_jsonish(text: str) -> str:
     return text
 
 
+def _extract_shopping_items(data: dict) -> List[ShoppingItem]:
+    """
+    Parse shopping list style items from model JSON.
+    Accepts either top-level "shopping_list" or dish-level ingredients with quantities.
+    """
+    if not isinstance(data, dict):
+        return []
+    items: List[ShoppingItem] = []
+    raw_list = data.get("shopping_list") or data.get("ingredients") or []
+    if isinstance(raw_list, list):
+        for entry in raw_list:
+            name = entry.get("name") if isinstance(entry, dict) else None
+            if not name:
+                continue
+            qty = entry.get("quantity") if isinstance(entry, dict) else None
+            unit = entry.get("unit") if isinstance(entry, dict) else None
+            try:
+                qty_val = float(qty) if qty is not None and str(qty).strip() != "" else None
+            except Exception:
+                qty_val = None
+            items.append(ShoppingItem(name=str(name), quantity=qty_val, unit=str(unit) if unit else None))
+    # If empty, attempt to backfill from dishes ingredients/ingredients_used.
+    if not items and "dishes" in data and isinstance(data["dishes"], list):
+        for d in data["dishes"]:
+            ing_list = d.get("ingredients") or d.get("ingredients_used") or []
+            for ing in ing_list:
+                if isinstance(ing, dict):
+                    name = ing.get("name")
+                    if not name:
+                        continue
+                    qty = ing.get("quantity")
+                    unit = ing.get("unit")
+                    try:
+                        qty_val = float(qty) if qty is not None and str(qty).strip() != "" else None
+                    except Exception:
+                        qty_val = None
+                    items.append(ShoppingItem(name=str(name), quantity=qty_val, unit=str(unit) if unit else None))
+                else:
+                    if ing:
+                        items.append(ShoppingItem(name=str(ing)))
+    return items
+
+
 def _build_recommendation_prompt(
     req: RecommendRequest,
     ingredients_txt: str,
@@ -502,7 +602,8 @@ User profile: {profile_txt}. Targets: {targets_txt}. Budget: {budget_txt} ({budg
 If profile is provided, aim for each dish to be roughly ~{per_meal_cal or 'target/meal'} kcal, Protein ~{per_meal_protein or 'target/meal'}g, Carbs ~{per_meal_carbs or 'target/meal'}g, Fat ~{per_meal_fat or 'target/meal'}g so totals across all dishes stay close to the daily targets (within ~10%).
 Use this nutrition context (prioritize these ingredients/macros if relevant):
 {rag_ctx if rag_ctx else "No context provided; rely on general nutrition knowledge."}
-Return JSON: {{"dishes":[{{"day":1,"name":"...","reason":"...","ingredients_used":["..."],"steps":["..."],"calories":500,"protein_g":40,"carbs_g":50,"fat_g":15}}]}}.
+Return JSON: {{"dishes":[{{"day":1,"name":"...","reason":"...","ingredients_used":["..."],"steps":["..."],"calories":500,"protein_g":40,"carbs_g":50,"fat_g":15}}]],"shopping_list":[{{"name":"chicken breast","quantity":2,"unit":"lb"}}]}}.
+Shopping list rules: each item MUST include numeric quantity and a unit from [g, kg, oz, lb, ml, l, cup, tbsp, tsp, piece]; if unsure, use quantity 1 and unit "piece".
 Days: {days}. Give specific dish names (e.g., "Spinach Feta Omelette", "Chipotle Chicken Wrap")—no generic "Morning/Lunch/Evening".
 If meals_per_day is 3, treat them as Breakfast, Lunch, Dinner in order; otherwise, rotate meal types and diversify cuisines (no all-breakfast set).
 Return exactly {needed_dishes} dishes total ({req.meals_per_day} per day), using day values 1..{days} with {req.meals_per_day} dishes per day.
@@ -550,6 +651,8 @@ Targets: {targets_txt if targets_txt else 'keep balanced macros and calories clo
 Days: {days}, meals per day: {req.meals_per_day}. Return the same number of dishes ({needed_dishes}) with day values 1..{days} and {req.meals_per_day} per day.
 Use nutrition context if helpful: {rag_ctx if rag_ctx else 'none'}.
 Return JSON only in the same shape as before: {{"dishes":[{{"day":1,"name":"...","reason":"...","ingredients_used":["..."],"steps":["..."],"calories":500,"protein_g":40,"carbs_g":50,"fat_g":15}}]}}.
+Include a shopping_list array with ingredient name, quantity, unit aggregated across dishes: "shopping_list":[{{"name":"salmon","quantity":2,"unit":"fillet"}}].
+Shopping list rules: each item MUST include numeric quantity and a unit from [g, kg, oz, lb, ml, l, cup, tbsp, tsp, piece]; if unsure, use quantity 1 and unit "piece".
 No markdown, no extra text, strictly valid JSON, 3-8 concise steps per dish.
 """
 
@@ -879,7 +982,7 @@ def _ingredient_pool(req: RecommendRequest) -> List[str]:
 
 def _generate_recommendations_with_hf(
     req: RecommendRequest,
-) -> Tuple[Optional[List[DishRecommendation]], Optional[int], Optional[str], Optional[str]]:
+) -> Tuple[Optional[List[DishRecommendation]], Optional[int], Optional[str], Optional[List[ShoppingItem]], Optional[str]]:
     """
     Generate dishes using the Hugging Face recipe model (HF_MODEL_ID).
     Returns dishes, parameter count, model_id used, and an error string (if any).
@@ -941,12 +1044,13 @@ Strictly output valid JSON (no trailing commas).
 """
     raw = generate_hf_recipes([prompt], model_id=model_id, **_hf_generation_settings())
     if not raw:
-        return None, None, model_id, get_last_hf_error() or "generation returned empty"
+        return None, None, model_id, None, get_last_hf_error() or "generation returned empty"
 
     # raw is a list (batch) from pipeline; use the first entry.
     raw_text = raw[0]
     _log_model_output(f"huggingface:{model_id}", raw_text)
     data = _parse_json_block(raw_text)
+    shopping_list = _extract_shopping_items(data) if data else []
     fallback_text_dishes: List[DishRecommendation] = []
     if not data:
         # Some chat models may ignore the JSON instruction; attempt a loose parse into a single dish.
@@ -970,61 +1074,75 @@ Strictly output valid JSON (no trailing commas).
     if not dishes and fallback_text_dishes:
         dishes = fallback_text_dishes
     if not dishes:
-        return None, None, model_id, validation_err or "parse failed"
+        return None, None, model_id, shopping_list, validation_err or "parse failed"
     # Get parameter count from cache if available.
     _, _, _, param_count = get_hf_pipeline(model_id_override=model_id)
-    return dishes, param_count, model_id, None
+    return dishes, param_count, model_id, shopping_list, None
 
-def _generate_recommendations_with_openai(req: RecommendRequest, prompt: str) -> Tuple[Optional[List[DishRecommendation]], str, Optional[int], Optional[str]]:
+def _generate_recommendations_with_openai(
+    req: RecommendRequest, prompt: str
+) -> Tuple[Optional[List[DishRecommendation]], str, Optional[int], Optional[List[ShoppingItem]], Optional[str]]:
     model_id = _default_openai_model(req.openai_model)
     client = OpenAIRecipeClient(model_id=model_id)
     raw, err = client.generate(prompt)
     if not raw:
-        return None, '', None, err or 'OpenAI generation failed'
+        return None, '', None, None, err or 'OpenAI generation failed'
     data = _parse_json_block(_sanitize_jsonish(raw))
     if not data:
-        return None, '', None, 'OpenAI parse failed'
+        return None, '', None, None, 'OpenAI parse failed'
+    shopping_list = _extract_shopping_items(data)
     dishes, validation_err = _validate_and_normalize_dishes(data, req)
     if not dishes:
-        return None, '', None, validation_err or 'OpenAI returned no dishes'
-    return dishes, f"openai:{model_id}", None, None
+        return None, '', None, shopping_list, validation_err or 'OpenAI returned no dishes'
+    return dishes, f"openai:{model_id}", None, shopping_list, None
 
-
-def _run_prompt_with_hf(req: RecommendRequest, prompt: str) -> Tuple[Optional[List[DishRecommendation]], Optional[int], Optional[str], Optional[str]]:
+def _run_prompt_with_hf(
+    req: RecommendRequest, prompt: str
+) -> Tuple[Optional[List[DishRecommendation]], Optional[int], Optional[str], Optional[List[ShoppingItem]], Optional[str]]:
     model_id = _default_hf_model(req.hf_model_id)
     if not model_id:
-        return None, None, None, "HF_MODEL_ID not set"
+        return None, None, None, None, "HF_MODEL_ID not set"
     raw = generate_hf_recipes([prompt], model_id=model_id, **_hf_generation_settings())
     if not raw:
-        return None, None, model_id, get_last_hf_error() or "generation returned empty"
+        return None, None, model_id, None, get_last_hf_error() or "generation returned empty"
     raw_text = raw[0]
     _log_model_output(f"huggingface:{model_id}", raw_text)
     data = _parse_json_block(_sanitize_jsonish(raw_text))
+    shopping_list = _extract_shopping_items(data) if data else []
     if not data:
-        return None, None, model_id, "HF parse failed"
+        return None, None, model_id, shopping_list, "HF parse failed"
     dishes, validation_err = _validate_and_normalize_dishes(data, req)
     if not dishes:
-        return None, None, model_id, validation_err or "HF returned no dishes"
+        return None, None, model_id, shopping_list, validation_err or "HF returned no dishes"
     _, _, _, param_count = get_hf_pipeline(model_id_override=model_id)
-    return dishes, param_count, model_id, None
+    return dishes, param_count, model_id, shopping_list, None
 
-
-def _run_prompt_with_ollama(req: RecommendRequest, prompt: str) -> Tuple[Optional[List[DishRecommendation]], Optional[str], Optional[str]]:
+def _run_prompt_with_ollama(
+    req: RecommendRequest, prompt: str
+) -> Tuple[Optional[List[DishRecommendation]], Optional[str], Optional[List[ShoppingItem]], Optional[str]]:
     model = _recipe_model_name(req.ollama_model)
     if not model:
-        return None, None, "OLLAMA_MODEL not set"
+        return None, None, None, "OLLAMA_MODEL not set"
     raw = _ollama_generate(prompt, model=model)
     if not raw:
-        return None, None, _get_last_ollama_error() or "Ollama call failed"
-    data = _parse_json_block(_sanitize_jsonish(raw))
+        return None, None, None, _get_last_ollama_error() or "Ollama call failed"
+    cleaned = raw.replace("```json", "").replace("```", "")
+    data = _parse_json_block(_sanitize_jsonish(cleaned))
     if not data:
-        return None, None, "Ollama parse failed"
+        # As a last resort, return a deterministic fallback to keep the UX responsive.
+        fallback = _fallback_recommendations(req)
+        if fallback:
+            return fallback, f"ollama:{model} (fallback)", [], None
+        return None, None, None, "Ollama parse failed"
+    shopping_list = _extract_shopping_items(data)
     dishes, validation_err = _validate_and_normalize_dishes(data, req)
     if not dishes:
-        return None, None, validation_err or "Ollama returned no dishes"
-    return dishes, f"ollama:{model}", None
+        return None, None, shopping_list, validation_err or "Ollama returned no dishes"
+    return dishes, f"ollama:{model}", shopping_list, None
 
-def generate_recommendations_with_llm(req: RecommendRequest) -> Tuple[Optional[List[DishRecommendation]], str, Optional[int], Optional[str]]:
+def generate_recommendations_with_llm(
+    req: RecommendRequest,
+) -> Tuple[Optional[List[DishRecommendation]], str, Optional[int], Optional[List[ShoppingItem]], Optional[str]]:
     """
     Honor user selection strictly: use the chosen model end-to-end.
     If none chosen, try OpenAI (default), then HF default, then Ollama default.
@@ -1068,49 +1186,34 @@ def generate_recommendations_with_llm(req: RecommendRequest) -> Tuple[Optional[L
     if req.openai_model:
         return _generate_recommendations_with_openai(req, prompt)
     if req.hf_model_id:
-        hf_dishes, hf_params, hf_model_id, hf_error = _generate_recommendations_with_hf(req)
+        hf_dishes, hf_params, hf_model_id, hf_shopping, hf_error = _run_prompt_with_hf(req, prompt)
         if hf_dishes:
-            return hf_dishes, f"huggingface:{hf_model_id}", hf_params, None
-        return None, '', None, hf_error or 'HF generation failed'
+            return hf_dishes, f"huggingface:{hf_model_id}", hf_params, hf_shopping, None
+        return None, '', None, hf_shopping, hf_error or 'HF generation failed'
     if req.ollama_model:
-        model = _recipe_model_name(req.ollama_model)
-        raw = _ollama_generate(prompt, model=model) if model else None
-        if raw:
-            data = _parse_json_block(_sanitize_jsonish(raw))
-            if data:
-                dishes, validation_err = _validate_and_normalize_dishes(data, req)
-                if dishes:
-                    return dishes, f"ollama:{model}", None, None
-                return None, '', None, validation_err or 'Ollama returned no dishes'
-        return None, '', None, _get_last_ollama_error() or 'Ollama call failed'
+        ollama_dishes, provider, shopping, err = _run_prompt_with_ollama(req, prompt)
+        if ollama_dishes:
+            return ollama_dishes, provider or f"ollama:{req.ollama_model}", None, shopping, None
+        return None, '', None, shopping, err or 'Ollama call failed'
 
     # Defaults: OpenAI -> HF default -> Ollama default.
-    oa_dishes, oa_provider, _, oa_err = _generate_recommendations_with_openai(req, prompt)
+    oa_dishes, oa_provider, _, oa_shopping, oa_err = _generate_recommendations_with_openai(req, prompt)
     if oa_dishes:
-        return oa_dishes, oa_provider, None, None
+        return oa_dishes, oa_provider, None, oa_shopping, None
 
-    hf_dishes, hf_params, hf_model_id, hf_error = _generate_recommendations_with_hf(req)
+    hf_dishes, hf_params, hf_model_id, hf_shopping, hf_error = _run_prompt_with_hf(req, prompt)
     if hf_dishes:
-        return hf_dishes, f"huggingface:{hf_model_id}", hf_params, None
+        return hf_dishes, f"huggingface:{hf_model_id}", hf_params, hf_shopping, None
 
-    model = _recipe_model_name(None)
-    if model:
-        raw = _ollama_generate(prompt, model=model)
-        if raw:
-            data = _parse_json_block(_sanitize_jsonish(raw))
-            if data:
-                dishes, validation_err = _validate_and_normalize_dishes(data, req)
-                if dishes:
-                    return dishes, f"ollama:{model}", None, None
-                return None, '', None, validation_err or 'Ollama returned no dishes'
-        return None, '', None, _get_last_ollama_error() or hf_error or oa_err or 'Ollama call failed'
-
-    return None, '', None, oa_err or hf_error or 'No model configured'
+    ollama_dishes, provider, shopping, ollama_err = _run_prompt_with_ollama(req, prompt)
+    if ollama_dishes:
+        return ollama_dishes, provider or "", None, shopping, None
+    return None, '', None, shopping, oa_err or hf_error or ollama_err or 'No model configured'
 
 
 def refine_recommendations_with_llm(
     feedback: str, dishes: List[DishRecommendation], req: RecommendRequest
-) -> Tuple[Optional[List[DishRecommendation]], str, Optional[int], Optional[str]]:
+) -> Tuple[Optional[List[DishRecommendation]], str, Optional[int], Optional[List[ShoppingItem]], Optional[str]]:
     profile_txt = "no profile provided"
     targets_txt = "keep meals balanced and macro-aware"
     if req.profile:
@@ -1137,31 +1240,32 @@ def refine_recommendations_with_llm(
     prompt = _build_refine_prompt(req, feedback, dishes, targets_txt, rag_ctx)
 
     if req.openai_model:
-        oa_dishes, provider, _, err = _generate_recommendations_with_openai(req, prompt)
+        oa_dishes, provider, _, shopping, err = _generate_recommendations_with_openai(req, prompt)
         if oa_dishes:
-            return oa_dishes, provider, None, None
-        return None, "", None, err
+            return oa_dishes, provider, None, shopping, None
+        return None, "", None, shopping, err
     if req.hf_model_id:
-        hf_dishes, params, model_id, err = _run_prompt_with_hf(req, prompt)
+        hf_dishes, params, model_id, shopping, err = _run_prompt_with_hf(req, prompt)
         if hf_dishes:
-            return hf_dishes, f"huggingface:{model_id}", params, None
-        return None, "", None, err
+            return hf_dishes, f"huggingface:{model_id}", params, shopping, None
+        return None, "", None, shopping, err
     if req.ollama_model:
-        ollama_dishes, provider, err = _run_prompt_with_ollama(req, prompt)
+        ollama_dishes, provider, shopping, err = _run_prompt_with_ollama(req, prompt)
         if ollama_dishes:
-            return ollama_dishes, provider or "", None, None
-        return None, "", None, err
+            return ollama_dishes, provider or "", None, shopping, None
+        return None, "", None, shopping, err
 
-    oa_dishes, provider, _, oa_err = _generate_recommendations_with_openai(req, prompt)
+    shopping = shopping_hf = shopping_ollama = None
+    oa_dishes, provider, _, shopping, oa_err = _generate_recommendations_with_openai(req, prompt)
     if oa_dishes:
-        return oa_dishes, provider, None, None
-    hf_dishes, params, model_id, hf_err = _run_prompt_with_hf(req, prompt)
+        return oa_dishes, provider, None, shopping, None
+    hf_dishes, params, model_id, shopping_hf, hf_err = _run_prompt_with_hf(req, prompt)
     if hf_dishes:
-        return hf_dishes, f"huggingface:{model_id}", params, None
-    ollama_dishes, provider, ollama_err = _run_prompt_with_ollama(req, prompt)
+        return hf_dishes, f"huggingface:{model_id}", params, shopping_hf, None
+    ollama_dishes, provider, shopping_ollama, ollama_err = _run_prompt_with_ollama(req, prompt)
     if ollama_dishes:
-        return ollama_dishes, provider or "", None, None
-    return None, "", None, oa_err or hf_err or ollama_err or "No model configured for refine"
+        return ollama_dishes, provider or "", None, shopping_ollama, None
+    return None, "", None, shopping or shopping_hf or shopping_ollama, oa_err or hf_err or ollama_err or "No model configured for refine"
 
 
 def generate_plan_with_llm(req: PlanRequest, targets: dict) -> Optional[List[DayPlan]]:
@@ -1358,7 +1462,7 @@ def recommend(req: RecommendRequest) -> RecommendationResponse:
         target_fields = targets
 
     try:
-        dishes, provider, param_count, err = _run_with_timeout(
+        dishes, provider, param_count, shopping_list, err = _run_with_timeout(
             lambda: generate_recommendations_with_llm(clean_req), timeout_seconds=30
         )
     except TimeoutError:
@@ -1374,8 +1478,23 @@ def recommend(req: RecommendRequest) -> RecommendationResponse:
         )
 
     notes: List[str] = []
+    instacart_links: Optional[dict] = None
+    shopping_items_payload: Optional[List[dict]] = (
+        [item.dict() for item in shopping_list] if shopping_list else None
+    )
+    if not shopping_items_payload and base_req.ingredients:
+        shopping_items_payload = [{"name": ing, "quantity": 1, "unit": "piece"} for ing in base_req.ingredients]
+    if not shopping_items_payload and clean_req.ingredients:
+        shopping_items_payload = [{"name": ing, "quantity": 1, "unit": "piece"} for ing in clean_req.ingredients]
     if provider:
         notes.append(f"Generated by {provider}.")
+    if shopping_list:
+        try:
+            instacart_links = create_shopping_list_with_search_links(
+                shopping_items_payload, title="LLM Grocery List"
+            )
+        except Exception as exc:
+            notes.append(f"Instacart link generation failed: {exc}")
 
     used = set()
     for d in dishes:
@@ -1394,6 +1513,8 @@ def recommend(req: RecommendRequest) -> RecommendationResponse:
         cuisine=clean_req.cuisine,
         model_provider=provider,
         model_parameters=param_count,
+        shopping_list=shopping_items_payload,
+        shopping_links=instacart_links,
     )
 
 
@@ -1409,7 +1530,7 @@ def refine_recommendations(req: RefineRequest) -> RecommendationResponse:
         targets = compute_recommendation_targets(base_req.profile, base_req.macro_split, base_req.target_calories, base_req.goal)
         target_fields = targets
 
-    dishes, provider, param_count, err = refine_recommendations_with_llm(req.feedback, req.dishes, base_req)
+    dishes, provider, param_count, shopping_list, err = refine_recommendations_with_llm(req.feedback, req.dishes, base_req)
     if dishes is None:
         raise HTTPException(
             status_code=503,
@@ -1417,8 +1538,19 @@ def refine_recommendations(req: RefineRequest) -> RecommendationResponse:
         )
 
     notes: List[str] = []
+    instacart_links: Optional[dict] = None
+    shopping_items_payload: Optional[List[dict]] = (
+        [item.dict() for item in shopping_list] if shopping_list else None
+    )
     if provider:
         notes.append(f"Refined by {provider}.")
+    if shopping_list:
+        try:
+            instacart_links = create_shopping_list_with_search_links(
+                shopping_items_payload, title="LLM Grocery List (Refined)"
+            )
+        except Exception as exc:
+            notes.append(f"Instacart link generation failed: {exc}")
 
     used = set()
     for d in dishes:
@@ -1437,6 +1569,8 @@ def refine_recommendations(req: RefineRequest) -> RecommendationResponse:
         cuisine=base_req.cuisine,
         model_provider=provider,
         model_parameters=param_count,
+        shopping_list=shopping_items_payload,
+        shopping_links=instacart_links,
     )
 
 
@@ -1484,6 +1618,37 @@ async def image_recipe(
     }
 
 
+@app.post("/shopping-list/render", response_class=HTMLResponse)
+def render_shopping_list(req: ShoppingLinksRequest) -> HTMLResponse:
+    """
+    Render an Instacart shopping list HTML page from shopping_list and optional shopping_links.
+    Cleans up the temporary file after generating the HTML string.
+    """
+    try:
+        links = req.shopping_links or create_shopping_list_with_search_links(
+            [item.dict() for item in req.shopping_list], title=req.title
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to generate Instacart links: {exc}")
+
+    try:
+        # Write to a temp file using the existing helper, then read and remove.
+        tmp_path = generate_html_page(
+            links.get("shopping_list_url"),
+            links.get("product_links", []),
+            filename="instacart_shopping_links.html",
+        )
+        html_content = Path(tmp_path).read_text(encoding="utf-8")
+        try:
+            Path(tmp_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to render shopping list HTML: {exc}")
+
+    return HTMLResponse(content=html_content, media_type="text/html")
+
+
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
@@ -1494,7 +1659,6 @@ def models() -> dict:
     catalog = _load_model_catalog()
     return {
         "ollama_model": _default_ollama_model(None),
-        "ollama_recipe_model": _recipe_model_name(None),
         "hf_model_id": _default_hf_model(None),
         "hf_models": catalog.get("huggingface", []),
         "ollama_models": catalog.get("ollama", []),

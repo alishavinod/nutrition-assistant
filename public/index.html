@@ -303,6 +303,10 @@ select:focus {
 
     <div class="card">
       <div id="target-summary">Provide profile info and run recommendations to see targets.</div>
+      <div class="actions">
+        <button id="finalize-btn" type="button">Finalize &amp; View Shopping List</button>
+      </div>
+      <div id="shopping-info" style="margin-top:8px; font-size:13px; color:#cbd5e1;">Shopping list: not available yet.</div>
     </div>
 
 </div>
@@ -341,9 +345,13 @@ select:focus {
     const dishCards = document.getElementById('dish-cards');
     const targetSummary = document.getElementById('target-summary');
     const modelSelect = document.getElementById('model_id');
+    const finalizeBtn = document.getElementById('finalize-btn');
+    const shoppingInfo = document.getElementById('shopping-info');
     let currentController = null;
     let lastRecommendPayload = null;
     let lastDishes = null;
+    let lastShoppingList = null;
+    let lastShoppingLinks = null;
 
   function renderDishes(res) {
     if (!dishCards) return;
@@ -409,6 +417,34 @@ select:focus {
       targetSummary.innerHTML = `
         Daily targets: ${res.target_calories} kcal, Protein ${res.target_protein_g}g, Carbs ${res.target_carbs_g}g, Fat ${res.target_fat_g}g
       `;
+    }
+
+    function renderShoppingLinks(res) {
+      if (!shoppingInfo) return;
+      const links = res && res.shopping_links ? res.shopping_links : null;
+      const list = res && res.shopping_list ? res.shopping_list : null;
+      if (!links && (!list || !list.length)) {
+        shoppingInfo.textContent = 'Shopping list: not available yet.';
+        return;
+      }
+      let html = '';
+      if (links && links.shopping_list_url) {
+        html += `<p><a href="${links.shopping_list_url}" target="_blank">Open Instacart list</a></p>`;
+      } else {
+        html += '<p>No Instacart URL (missing/failed API); using local items.</p>';
+      }
+      const products = links && links.product_links ? links.product_links : [];
+      const preview = (products.length ? products : (list || [])).slice(0, 5);
+      if (preview.length) {
+        html += '<ul style="padding-left:18px;margin:6px 0;">' +
+          preview.map(p => {
+            const name = p.search_term || p.name || '';
+            const qty = p.quantity ? ` (${p.quantity} ${p.unit || ''})` : '';
+            return `<li>${name}${qty}</li>`;
+          }).join('') +
+          '</ul>';
+      }
+      shoppingInfo.innerHTML = html;
     }
 
     async function loadModelOptions(backend) {
@@ -505,8 +541,11 @@ select:focus {
           }
           renderDishes(data);
           renderTargets(data);
+          renderShoppingLinks(data);
           lastDishes = data.dishes || [];
           lastRecommendPayload = payload;
+          lastShoppingList = data.shopping_list || null;
+          lastShoppingLinks = data.shopping_links || null;
           const usedProvider = data.model_provider || 'unknown';
           if (modelUsedEl) modelUsedEl.textContent = `Used: ${usedProvider}`;
           setStatus(`OK (${usedProvider})`);
@@ -577,8 +616,11 @@ select:focus {
             return;
           }
           lastDishes = data.dishes || [];
+          lastShoppingList = data.shopping_list || lastShoppingList;
+          lastShoppingLinks = data.shopping_links || lastShoppingLinks;
           renderDishes(data);
           renderTargets(data);
+          renderShoppingLinks(data);
           if (refineStatus) refineStatus.textContent = `Refined with ${data.model_provider || 'unknown'}`;
         } catch (e) {
           if (refineStatus) refineStatus.textContent = `Error: ${e}`;
@@ -586,6 +628,38 @@ select:focus {
           if (refineStatus && (!refineStatus.textContent || refineStatus.textContent.startsWith('Refining'))) {
             refineStatus.textContent = 'Idle';
           }
+        }
+      });
+    }
+
+    if (finalizeBtn) {
+      finalizeBtn.addEventListener('click', async () => {
+        const backend = document.getElementById('backend').value || 'http://localhost:8000';
+        if (!lastShoppingList || !Array.isArray(lastShoppingList) || !lastShoppingList.length) {
+          alert('No shopping list available yet. Please run recommendations first.');
+          return;
+        }
+        try {
+          const resp = await fetch(`${backend}/shopping-list/render`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              shopping_list: lastShoppingList,
+              shopping_links: lastShoppingLinks,
+              title: 'Your Grocery List'
+            })
+          });
+          const html = await resp.text();
+          if (!resp.ok) {
+            alert(`Error rendering shopping list: ${html}`);
+            return;
+          }
+          // Open via blob URL to preserve content and reduce popup blocking.
+          const blob = new Blob([html], { type: 'text/html' });
+          const url = URL.createObjectURL(blob);
+          window.open(url, '_blank');
+        } catch (e) {
+          alert(`Error rendering shopping list: ${e}`);
         }
       });
     }

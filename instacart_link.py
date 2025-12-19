@@ -108,4 +108,7 @@ if __name__ == "__main__":
 
 
 
-## export INSTACART_API_KEY="keys.aey4IdGLsXAYehcNXQWR7IiSrph999Qyo15OEehAWCM"
+## export INSTACART_API_KEY="Bearer keys.aey4IdGLsXAYehcNXQWR7IiSrph999Qyo15OEehAWCM"
+
+
+keys.aey4IdGLsXAYehcNXQWR7IiSrph999Qyo15OEehAWCM
