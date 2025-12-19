@@ -31,6 +31,7 @@ from .instacart_hook import create_shopping_list_with_search_links, generate_htm
 ROOT_DIR = Path(__file__).resolve().parents[2]
 _EXECUTOR = ThreadPoolExecutor(max_workers=4)
 
+import os
 app = FastAPI(title="Nutrition Planner", version="0.1.0")
 
 # Allow browser demos from static hosts (e.g., GitHub Pages hitting localhost backend).
