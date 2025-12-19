@@ -413,6 +413,9 @@ def compute_recommendation_targets(
 def _ollama_generate(text: str, model: str) -> Optional[str]:
     """Call a local Ollama model. Returns raw response text or None on error."""
     url = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
+    # Normalize URL to include the generate endpoint.
+    if "/api/generate" not in url:
+        url = url.rstrip("/") + "/api/generate"
     try:
         resp = requests.post(
             url,

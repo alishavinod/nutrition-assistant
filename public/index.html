@@ -5,131 +5,327 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nutrition Planner Demo</title>
   <style>
-    :root { --bg: #0c1220; --card: #141c2c; --accent: #4fd1c5; --text: #e8edf6; --muted: #9aa7bf; }
-    body { margin: 0; font-family: 'Inter', system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); display: flex; justify-content: center; padding: 24px; }
+    :root { background-color: black; }
+    html {
+  background: url('nutrition-background.jpg') no-repeat center / cover;
+  min-height: 100%;
+  background-attachment: fixed;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+}
+    body { 
+            color:black;
+            padding:120px;
+      font-family: -apple-system, BlinkMacSystemFont, avenir next, avenir, segoe ui, helvetica neue, helvetica, Cantarell, Ubuntu, roboto, noto, arial, sans-serif;
+   }
+    .header {
+  padding: 60px 16px 100px;
+  font-size: 60px;
+  font-weight: 800;
+  color: black;
+}
     .container { width: min(1200px, 100%); }
-    h1 { margin: 0 0 8px; }
-    p { color: var(--muted); margin: 0 0 16px; }
-    .card { background: var(--card); border: 1px solid #1f2a40; border-radius: 14px; padding: 16px; margin-bottom: 16px; box-shadow: 0 10px 40px rgba(0,0,0,0.25); }
+    h1 { margin: 0 0 8px;}
+    p { margin: 0 0 16px; }
+    .card 
+    {
+      padding-top: 16px; 
+      padding: 20px;
+    }
     form { display: grid; grid-template-columns: repeat(auto-fit,minmax(240px,1fr)); gap: 12px; }
-    label { display: flex; flex-direction: column; font-size: 14px; gap: 6px; }
-    input, select { padding: 10px; border-radius: 10px; border: 1px solid #1f2a40; background: #10182a; color: var(--text); }
-    button { background: var(--accent); color: #0c1220; border: none; padding: 12px 16px; border-radius: 10px; font-weight: 600; cursor: pointer; }
+   
+    button { background: #648691; color: #fff; border: none; padding: 12px 16px; border-radius: 10px; font-weight: 600; cursor: pointer; }
     button:disabled { opacity: 0.6; cursor: not-allowed; }
     .actions { display: flex; gap: 12px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
-    .tag { display: inline-block; background: #1f2a40; color: var(--muted); padding: 4px 8px; border-radius: 8px; font-size: 12px; }
-    .dish-card { background: #10182a; border: 1px solid #1b2538; border-radius: 12px; padding: 12px; margin-bottom: 12px; }
+    .dish-card {  background: #afb9c4; color: black; border: 1px solid #e5e7eb; border-radius: 12px; padding: 12px; margin: 12px; box-shadow: 0 6px 18px rgba(0,0,0,0.08); width: 400px;}
+    .dish-img { height: 160px; border-radius: 10px; margin-bottom: 10px; }
     .upload { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    pre { background: #0d1424; border: 1px solid #1f2a40; padding: 12px; border-radius: 10px; color: #cbd5e1; overflow: auto; max-height: 320px; }
+    pre { background: #f3f4f6; border: 1px solid #e5e7eb; padding: 12px; border-radius: 10px; color: #111827; overflow: auto; max-height: 320px; }
+  .profile-card {
+  border-radius: 20px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.section {
+  margin-bottom: 28px;
+}
+
+.header {
+  font-size: 50px;;
+}
+
+.section-title {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: black;
+  text-transform: uppercase;
+  margin-bottom: 16px;
+}
+
+.grid-4 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+label {
+  font-size: 18px;
+  font-weight: 600;
+  text-transform: capitalize;
+  letter-spacing: 0.02em;
+  display: flex;
+  flex-direction: column;
+  color: black;
+}
+
+input,
+select {
+  margin-top: 6px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-size: 14px;
+    background: #ffffff61;
+}
+
+input:focus,
+select:focus {
+  outline: none;
+  border-color: rgb(124, 209, 235);
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.15);
+}
+
+.primary-btn {
+ background: #648691;
+  color: white;
+  padding: 14px 28px;
+  border-radius: 14px;
+  font-size: 15px;
+  font-weight: 700;
+  border: none;
+  cursor: pointer;
+}
+
+.primary-btn:hover {
+  transform: translateY(-1px);
+}
+
+.dish-card.compact {
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.dish-card.compact:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 30px rgba(0,0,0,0.12);
+}
+
+.dish-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.dish-title {
+  margin: 4px 0 0;
+  font-size: 18px;
+}
+
+.dish-meal {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: #64748b;
+  text-transform: uppercase;
+}
+
+.dish-time {
+  background: #f1f5f9;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.macro-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.macro-grid div {
+  background: #d1dce0;
+  border-radius: 12px;
+  padding: 10px;
+  text-align: center;
+}
+
+.macro-grid span {
+  display: block;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.view-recipe {
+  font-weight: 600;
+  margin-top: 10px;
+}
+
+.recipe {
+  margin-top: 12px;
+  animation: fadeIn 0.2s ease;
+}
+
+.hidden {
+  display: none;
+}
+
+#model_id{
+  width: 200px;
+}
+
+#dish-cards {
+     display: flex;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
   </style>
 </head>
 <body>
+  <div class="header">🥗 MacroCart - A one stop shop for your nutrition needs </div>
   <div class="container">
     <div class="card">
-      <h1>Nutrition Planner</h1>
-      <p>Set your backend and pick a model; defaults to <code>http://localhost:8000</code>.</p>
-      <form>
-        <label>Backend URL
-          <input id="backend" value="http://localhost:8000" />
-        </label>
         <label>Model (Hugging Face, OpenAI, or Ollama)
           <select id="model_id">
             <option value="">Use backend default</option>
           </select>
         </label>
       </form>
-      <div class="actions">
-        <span id="status" class="tag">Idle</span>
-        <span id="model-used" class="tag">Model: (not selected)</span>
-      </div>
     </div>
 
-    <div class="card">
-      <div class="tag">Profile & Preferences</div>
-      <form id="planner-form">
-        <label>Height (cm)<input id="height_cm" type="number" value="175" required /></label>
-        <label>Weight (kg)<input id="weight_kg" type="number" value="70" required /></label>
-        <label>Age<input id="age" type="number" value="30" required /></label>
-        <label>Sex
-          <select id="sex"><option value="male">Male</option><option value="female">Female</option></select>
-        </label>
-        <label>Activity
-          <select id="activity">
-            <option value="moderate">Moderate</option>
-            <option value="sedentary">Sedentary</option>
-            <option value="light">Light</option>
-            <option value="heavy">Heavy</option>
-            <option value="athlete">Athlete</option>
-          </select>
-        </label>
-        <label>Dietary Preference
-          <select id="diet">
-            <option value="omnivore">Omnivore</option>
-            <option value="vegetarian">Vegetarian</option>
-            <option value="vegan">Vegan</option>
-            <option value="pescatarian">Pescatarian</option>
-            <option value="keto">Keto</option>
-            <option value="paleo">Paleo</option>
-          </select>
-        </label>
-        <label>Meals per day<input id="meals_per_day" type="number" min="1" max="6" value="3" /></label>
-        <label>Budget amount<input id="budget_amount" type="number" step="0.01" value="100" /></label>
-        <label>Goal
-          <select id="goal">
-            <option value="fat_loss">Fat loss</option>
-            <option value="muscle_gain">Muscle gain</option>
-            <option value="maintenance" selected>Maintenance</option>
-          </select>
-        </label>
-        <label>Cuisine
-          <select id="cuisine">
-            <option value="">Any</option>
-            <option value="italian">Italian</option>
-            <option value="indian">Indian</option>
-            <option value="mexican">Mexican</option>
-            <option value="thai">Thai</option>
-            <option value="japanese">Japanese</option>
-            <option value="mediterranean">Mediterranean</option>
-          </select>
-        </label>
-        <label>Allergies (comma separated)<input id="allergies" placeholder="peanut, dairy" /></label>
-        <label>Recommendation period
-          <select id="period">
-            <option value="one_day">1 day</option>
-            <option value="seven_days">7 days</option>
-          </select>
-        </label>
-      </form>
-      <div class="actions">
-        <button id="recommend">Recommend Dishes</button>
-      </div>
+    <div class="card profile-card">
+
+  <div class="section">
+    <div class="section-title">User Profile</div>
+    <div class="grid-4">
+      <label>Height (cm)
+        <input id="height_cm" type="number" value="175" required />
+      </label>
+
+      <label>Weight (kg)
+        <input id="weight_kg" type="number" value="70" required />
+      </label>
+
+      <label>Age
+        <input id="age" type="number" value="30" required />
+      </label>
+
+      <label>Sex
+        <select id="sex">
+          <option value="male">Male</option>
+          <option value="female">Female</option>
+        </select>
+      </label>
     </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Preferences</div>
+    <div class="grid-4">
+      <label>Activity
+        <select id="activity">
+          <option value="moderate">Moderate</option>
+          <option value="sedentary">Sedentary</option>
+          <option value="light">Light</option>
+          <option value="heavy">Heavy</option>
+          <option value="athlete">Athlete</option>
+        </select>
+      </label>
+
+      <label>Dietary Preference
+        <select id="diet">
+          <option value="omnivore">Omnivore</option>
+          <option value="vegetarian">Vegetarian</option>
+          <option value="vegan">Vegan</option>
+          <option value="pescatarian">Pescatarian</option>
+          <option value="keto">Keto</option>
+          <option value="paleo">Paleo</option>
+        </select>
+      </label>
+
+      <label>Goal
+        <select id="goal">
+          <option value="fat_loss">Fat loss</option>
+          <option value="muscle_gain">Muscle gain</option>
+          <option value="maintenance" selected>Maintenance</option>
+        </select>
+      </label>
+
+      <label>Cuisine
+        <select id="cuisine">
+          <option value="">Any</option>
+          <option value="italian">Italian</option>
+          <option value="indian">Indian</option>
+          <option value="mexican">Mexican</option>
+          <option value="thai">Thai</option>
+          <option value="japanese">Japanese</option>
+          <option value="mediterranean">Mediterranean</option>
+        </select>
+      </label>
+
+      <label>Meals per day
+        <input id="meals_per_day" type="number" min="1" max="6" value="3" />
+      </label>
+
+      <label>Budget amount
+        <input id="budget_amount" type="number" step="0.01" value="100" />
+      </label>
+
+      <label>Allergies
+        <input id="allergies" placeholder="peanut, dairy" />
+      </label>
+
+      <label>Recommendation period
+        <select id="period">
+          <option value="one_day">1 day</option>
+          <option value="seven_days">7 days</option>
+        </select>
+      </label>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button id="recommend" class="primary-btn">Recommend Dishes</button>
+  </div>
 
     <div class="card">
-      <div class="tag">Targets & Model</div>
       <div id="target-summary">Provide profile info and run recommendations to see targets.</div>
     </div>
 
+</div>
+
     <div class="card">
-      <div class="tag">Dish Recommendations</div>
+      <h1>Dish Recommendations</h1>
       <div id="dish-cards">Waiting for recommendations...</div>
     </div>
 
     <div class="card">
-      <div class="tag">Refine Recommendations (chat-style)</div>
+      <h1>Refine Recommendations</h1>
       <div class="actions">
-        <input id="refine-input" placeholder="E.g., prefer yogurt over oats, avoid almonds" style="flex:1; min-width: 300px; padding:10px; border-radius:10px; border:1px solid #1f2a40; background:#10182a; color:var(--text);" />
+        <input id="refine-input" placeholder="E.g., prefer yogurt over oats, avoid almonds" style="width: 500px; padding:10px; border-radius:10px; border:1px solid; color:var(--text);" />
         <button id="refine-btn" type="button">Refine</button>
       </div>
-      <div id="refine-status" class="tag">Idle</div>
     </div>
 
     <div class="card">
-      <div class="tag">Image to Recipe (placeholder)</div>
+      <h1>Image to Recipe</h1>
       <div class="upload">
         <input type="file" id="image-file" accept="image/*" />
         <button id="upload-btn" type="button">Upload &amp; Describe</button>
-        <span id="upload-status" class="tag">Idle</span>
+        <div id="upload-status" style="margin-top:8px; font-size:13px; color:white;"> Idle</div>
       </div>
       <pre id="upload-output">No image uploaded.</pre>
     </div>
@@ -149,27 +345,52 @@
     let lastRecommendPayload = null;
     let lastDishes = null;
 
-    function renderDishes(res) {
-      if (!dishCards) return;
-      if (!res || !Array.isArray(res.dishes)) {
-        dishCards.textContent = 'No dishes returned. Check backend logs or LLM availability.';
-        return;
-      }
-      dishCards.innerHTML = '';
-      res.dishes.forEach(d => {
-        const card = document.createElement('div');
-        card.className = 'dish-card';
-        card.innerHTML = `
-          <div class="tag">Day ${d.day}</div>
-          <h3>${d.name}</h3>
-          <p>${d.reason || ''}</p>
-          <p><strong>Uses:</strong> ${d.ingredients_used.join(', ')}</p>
-          ${d.steps && d.steps.length ? `<ol>${d.steps.map(s => `<li>${s}</li>`).join('')}</ol>` : ''}
-          ${d.calories ? `<p>Macros: ${d.calories} kcal, P:${d.protein_g||'-'} C:${d.carbs_g||'-'} F:${d.fat_g||'-'}</p>` : ''}
-        `;
-        dishCards.appendChild(card);
-      });
-    }
+  function renderDishes(res) {
+    if (!dishCards) return;
+    if (!res || !Array.isArray(res.dishes)) {
+      dishCards.textContent = 'No dishes returned.';
+      return;
+  }
+
+  dishCards.innerHTML = '';
+
+  res.dishes.forEach((d, idx) => {
+    const card = document.createElement('div');
+    card.className = 'dish-card compact';
+    card.innerHTML = `
+      <div class="dish-header">
+        <div>
+          <span class="dish-meal">Day ${d.day || 1}</span>
+          <h3 class="dish-title">${d.name}</h3>
+        </div>
+        <span class="dish-time">${d.time_min || 15} min</span>
+      </div>
+
+      <div class="macro-grid">
+        <div><strong>${d.calories || '-'} kcal</strong><span>Calories</span></div>
+        <div><strong>${d.protein_g || '-'} g</strong><span>Protein</span></div>
+        <div><strong>${d.carbs_g || '-'} g</strong><span>Carbs</span></div>
+        <div><strong>${d.fat_g || '-'} g</strong><span>Fat</span></div>
+      </div>
+
+      <div class="view-recipe">View Recipe ▾</div>
+
+      <div class="recipe hidden">
+        <p><strong>Ingredients:</strong> ${d.ingredients_used.join(', ')}</p>
+        ${d.steps?.length ? `<ol>${d.steps.map(s => `<li>${s}</li>`).join('')}</ol>` : ''}
+      </div>
+    `;
+
+    card.addEventListener('click', () => {
+      card.classList.toggle('open');
+      card.querySelector('.recipe').classList.toggle('hidden');
+      card.querySelector('.view-recipe').textContent =
+        card.classList.contains('open') ? 'Hide Recipe ▴' : 'View Recipe ▾';
+    });
+
+    dishCards.appendChild(card);
+  });
+}
 
     function renderTargets(res) {
       if (!targetSummary) return;
@@ -181,14 +402,12 @@
       const params = res.model_parameters ? `${res.model_parameters.toLocaleString()} params` : '';
       if (!res.target_calories) {
         targetSummary.innerHTML = `
-          <p>Model: <strong>${model}</strong>${params ? ` (${params})` : ''}</p>
           <p>No profile provided, so targets are not calculated.</p>
         `;
         return;
       }
       targetSummary.innerHTML = `
-        <p>Model: <strong>${model}</strong>${params ? ` (${params})` : ''}</p>
-        <p>Daily targets: ${res.target_calories} kcal, Protein ${res.target_protein_g}g, Carbs ${res.target_carbs_g}g, Fat ${res.target_fat_g}g</p>
+        Daily targets: ${res.target_calories} kcal, Protein ${res.target_protein_g}g, Carbs ${res.target_carbs_g}g, Fat ${res.target_fat_g}g
       `;
     }
 
@@ -236,7 +455,8 @@
         currentController = controller;
         if (dishCards) dishCards.textContent = 'Loading...';
         setStatus('Loading recommend...');
-        const backend = document.getElementById('backend').value || 'http://localhost:8000';
+        const backendInput = document.getElementById('backend');
+        const backend = backendInput?.value || 'http://localhost:8000';
         await loadModelOptions(backend);
         const profile = {
           height_cm: Number(document.getElementById('height_cm').value),
@@ -310,7 +530,7 @@
           if (uploadStatus) uploadStatus.textContent = 'No file selected';
           return;
         }
-        const backend = document.getElementById('backend').value || 'http://localhost:8000';
+        const backend = document.getElementById('backend')?.value || 'http://localhost:8000';
         const form = new FormData();
         form.append('file', fileInput.files[0]);
         const selectedModel = modelSelect ? modelSelect.value : '';
@@ -340,7 +560,7 @@
           if (refineStatus) refineStatus.textContent = 'Run recommendations first.';
           return;
         }
-        const backend = document.getElementById('backend').value || 'http://localhost:8000';
+        const backend = document.getElementById('backend')?.value || 'http://localhost:8000';
         const feedback = refineInput ? refineInput.value : '';
         if (!feedback.trim()) {
           if (refineStatus) refineStatus.textContent = 'Enter feedback.';
