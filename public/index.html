@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Nutrition Planner Demo</title>
+  <title>MacroCart Demo</title>
   <style>
     :root { background-color: black; }
     html {
@@ -16,6 +16,7 @@
     body { 
             color:black;
             padding:120px;
+            
       font-family: -apple-system, BlinkMacSystemFont, avenir next, avenir, segoe ui, helvetica neue, helvetica, Cantarell, Ubuntu, roboto, noto, arial, sans-serif;
    }
     .header {
@@ -23,9 +24,9 @@
   font-size: 60px;
   font-weight: 800;
   color: black;
+  font-family: auto;
 }
     .container { width: min(1200px, 100%); }
-    h1 { margin: 0 0 8px;}
     p { margin: 0 0 16px; }
     .card 
     {
@@ -52,15 +53,6 @@
 
 .header {
   font-size: 50px;;
-}
-
-.section-title {
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: black;
-  text-transform: uppercase;
-  margin-bottom: 16px;
 }
 
 .grid-4 {
@@ -209,7 +201,7 @@ select:focus {
     <div class="card profile-card">
 
   <div class="section">
-    <div class="section-title">User Profile</div>
+    <h1 class="section-title">User Profile</h1>
     <div class="grid-4">
       <label>Height (cm)
         <input id="height_cm" type="number" value="175" required />
