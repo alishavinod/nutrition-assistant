@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Instacart Shopping List</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #111827 40%, #0b3b2e 100%);
+            color: #e5e7eb;
+            margin: 0;
+            padding: 32px 16px;
+        }
+        .wrapper {
+            max-width: 960px;
+            margin: 0 auto;
+        }
+        .card {
+            background: #0b1220;
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 16px;
+            padding: 28px;
+            box-shadow: 0 18px 50px rgba(0,0,0,0.35);
+        }
+        h1 {
+            margin: 0 0 6px;
+            font-size: 28px;
+            color: #4ade80;
+            letter-spacing: 0.2px;
+        }
+        p.lead { margin: 0 0 18px; color: #cbd5e1; }
+        .main-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: linear-gradient(90deg, #22c55e, #16a34a);
+            color: #0b1220;
+            padding: 12px 18px;
+            border-radius: 10px;
+            text-decoration: none;
+            font-weight: 700;
+            box-shadow: 0 10px 30px rgba(22,163,74,0.35);
+            margin: 12px 0 8px;
+        }
+        .main-link:hover { filter: brightness(1.05); }
+        .note {
+            background: rgba(74, 222, 128, 0.08);
+            border: 1px solid rgba(74, 222, 128, 0.25);
+            color: #caffbf;
+            padding: 12px;
+            border-radius: 10px;
+            margin: 10px 0 18px;
+            font-size: 14px;
+        }
+        h2 {
+            margin: 22px 0 10px;
+            font-size: 18px;
+            color: #a5b4fc;
+            letter-spacing: 0.4px;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit,minmax(240px,1fr));
+            gap: 12px;
+        }
+        .product-item {
+            background: #111827;
+            border: 1px solid rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 14px;
+        }
+        .product-name {
+            font-weight: 700;
+            margin: 0 0 4px;
+            color: #e5e7eb;
+        }
+        .product-qty {
+            font-size: 13px;
+            color: #cbd5e1;
+            margin: 0 0 8px;
+        }
+        .product-link {
+            color: #34d399;
+            font-weight: 600;
+            text-decoration: none;
+        }
+        .product-link:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="wrapper">
+        <div class="card">
+            <h1>🛒 Your Instacart Shopping List</h1>
+            <p class="lead">Open the Instacart list or use the quick search links below.</p>
+            {{SHOPPING_LIST_SECTION}}
+            <h2>Search Links</h2>
+            <div class="grid">
+                {{PRODUCT_ITEMS}}
+            </div>
+        </div>
+    </div>
+</body>
+</html>

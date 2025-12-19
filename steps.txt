@@ -106,3 +106,22 @@ kill -9 70510
 
 pkill -f uvicorn || true
 pkill -f "src.app.main" || true
+
+
+
+###
+
+sudo apt update
+sudo apt install python3 -y
+sudo apt install python3-pip -y
+
+sudo apt-get install git
+
+
+sudo snap install --classic code
+
+## setup git
+
+pip3 install transformers
+pip install pandas
+pip install -U langchain langchain-community langchain-core langsmith langchain-text-splitters
