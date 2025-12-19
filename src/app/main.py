@@ -256,6 +256,42 @@ class ShoppingItem(BaseModel):
     quantity: Optional[float] = None
     unit: Optional[str] = None
 
+def _normalize_shopping_items(items: Optional[List[ShoppingItem]]) -> List[ShoppingItem]:
+    """
+    Ensure every shopping item has a numeric quantity and a unit. Defaults: quantity=1, unit="" (no forced 'piece').
+    """
+    normalized: List[ShoppingItem] = []
+    if not items:
+        return normalized
+    for itm in items:
+        qty_raw = itm.quantity if itm and itm.quantity is not None else 1
+        try:
+            qty_val = float(qty_raw)
+        except Exception:
+            qty_val = 1.0
+        unit = (itm.unit or "").strip()
+        normalized.append(ShoppingItem(name=itm.name, quantity=qty_val, unit=unit))
+    return normalized
+
+def _build_shopping_from_dishes(dishes: List[DishRecommendation]) -> List[dict]:
+    """
+    Fallback: derive shopping items from dish ingredients_used when the model
+    does not return an explicit shopping_list. Quantities default to 1, unit empty.
+    """
+    if not dishes:
+        return []
+    seen = set()
+    items: List[dict] = []
+    for dish in dishes:
+        for ing in dish.ingredients_used:
+            name = ing.strip()
+            key = name.lower()
+            if not name or key in seen:
+                continue
+            seen.add(key)
+            items.append({"name": name, "quantity": 1, "unit": ""})
+    return items
+
 
 class ShoppingLinksRequest(BaseModel):
     shopping_list: List[ShoppingItem]
@@ -688,6 +724,12 @@ def _validate_and_normalize_dishes(data: dict, req: RecommendRequest) -> Tuple[L
     - deduplicate names
     - normalize steps
     """
+    # Accept list payloads by wrapping into a dict.
+    if isinstance(data, list):
+        data = {"dishes": data}
+    if not isinstance(data, dict):
+        return [], "invalid response shape"
+
     days = 1 if req.period == RecommendationPeriod.one_day else 7
     needed_dishes = req.meals_per_day * days
     raw_list = data.get("dishes")
@@ -1047,7 +1089,7 @@ Strictly output valid JSON (no trailing commas).
     raw_text = raw[0]
     _log_model_output(f"huggingface:{model_id}", raw_text)
     data = _parse_json_block(raw_text)
-    shopping_list = _extract_shopping_items(data) if data else []
+    shopping_list = _normalize_shopping_items(_extract_shopping_items(data) if data else [])
     fallback_text_dishes: List[DishRecommendation] = []
     if not data:
         # Some chat models may ignore the JSON instruction; attempt a loose parse into a single dish.
@@ -1087,7 +1129,7 @@ def _generate_recommendations_with_openai(
     data = _parse_json_block(_sanitize_jsonish(raw))
     if not data:
         return None, '', None, None, 'OpenAI parse failed'
-    shopping_list = _extract_shopping_items(data)
+    shopping_list = _normalize_shopping_items(_extract_shopping_items(data))
     dishes, validation_err = _validate_and_normalize_dishes(data, req)
     if not dishes:
         return None, '', None, shopping_list, validation_err or 'OpenAI returned no dishes'
@@ -1105,7 +1147,7 @@ def _run_prompt_with_hf(
     raw_text = raw[0]
     _log_model_output(f"huggingface:{model_id}", raw_text)
     data = _parse_json_block(_sanitize_jsonish(raw_text))
-    shopping_list = _extract_shopping_items(data) if data else []
+    shopping_list = _normalize_shopping_items(_extract_shopping_items(data) if data else [])
     if not data:
         return None, None, model_id, shopping_list, "HF parse failed"
     dishes, validation_err = _validate_and_normalize_dishes(data, req)
@@ -1131,7 +1173,7 @@ def _run_prompt_with_ollama(
         if fallback:
             return fallback, f"ollama:{model} (fallback)", [], None
         return None, None, None, "Ollama parse failed"
-    shopping_list = _extract_shopping_items(data)
+    shopping_list = _normalize_shopping_items(_extract_shopping_items(data))
     dishes, validation_err = _validate_and_normalize_dishes(data, req)
     if not dishes:
         return None, None, shopping_list, validation_err or "Ollama returned no dishes"
@@ -1479,13 +1521,18 @@ def recommend(req: RecommendRequest) -> RecommendationResponse:
     shopping_items_payload: Optional[List[dict]] = (
         [item.dict() for item in shopping_list] if shopping_list else None
     )
-    if not shopping_items_payload and base_req.ingredients:
-        shopping_items_payload = [{"name": ing, "quantity": 1, "unit": "piece"} for ing in base_req.ingredients]
+    if not shopping_items_payload:
+        # build from dishes ingredients_used as a fallback, then ingredients
+        items_from_dishes = _build_shopping_from_dishes(dishes)
+        if items_from_dishes:
+            shopping_items_payload = items_from_dishes
+        elif clean_req.ingredients:
+            shopping_items_payload = [{"name": ing, "quantity": 1, "unit": ""} for ing in clean_req.ingredients]
     if not shopping_items_payload and clean_req.ingredients:
         shopping_items_payload = [{"name": ing, "quantity": 1, "unit": "piece"} for ing in clean_req.ingredients]
     if provider:
         notes.append(f"Generated by {provider}.")
-    if shopping_list:
+    if shopping_items_payload:
         try:
             instacart_links = create_shopping_list_with_search_links(
                 shopping_items_payload, title="LLM Grocery List"
@@ -1539,9 +1586,15 @@ def refine_recommendations(req: RefineRequest) -> RecommendationResponse:
     shopping_items_payload: Optional[List[dict]] = (
         [item.dict() for item in shopping_list] if shopping_list else None
     )
+    if not shopping_items_payload:
+        items_from_dishes = _build_shopping_from_dishes(dishes)
+        if items_from_dishes:
+            shopping_items_payload = items_from_dishes
+        elif base_req.ingredients:
+            shopping_items_payload = [{"name": ing, "quantity": 1, "unit": ""} for ing in base_req.ingredients]
     if provider:
         notes.append(f"Refined by {provider}.")
-    if shopping_list:
+    if shopping_items_payload:
         try:
             instacart_links = create_shopping_list_with_search_links(
                 shopping_items_payload, title="LLM Grocery List (Refined)"
