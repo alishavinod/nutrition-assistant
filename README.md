@@ -1,6 +1,6 @@
 # Nutrition Planner Demo
 
-Showcase-ready repo with a structured backend/frontend split. FastAPI powers the API; a static UI works on GitHub Pages and calls your backend. Uses a dummy pricing catalog (no real product API) and an optional local LLM via Ollama.
+A showcase-ready repository with a clearly structured backend and frontend split. The backend is powered by FastAPI, exposing clean, well-defined APIs, while the frontend is a lightweight static UI deployed via GitHub Pages that communicates directly with the backend. The system uses a dummy pricing catalog for cost estimation, avoiding reliance on real product APIs, and supports optional local large language model inference through Ollama for offline and cost-controlled generation.
 
 ## Repo Layout
 - `src/app/` — FastAPI app.
