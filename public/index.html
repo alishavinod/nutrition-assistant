@@ -100,7 +100,7 @@ select:focus {
   color: white;
   padding: 14px 28px;
   border-radius: 14px;
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 700;
   border: none;
   cursor: pointer;
@@ -298,17 +298,13 @@ select:focus {
   </div>
 
   <div class="actions">
-    <button id="recommend" class="primary-btn">Recommend Dishes</button>
+    <button id="recommend" class="primary-btn" style="margin-bottom: 30px">Recommend Dishes</button>
   </div>
-
-    <div class="card">
-      <div id="target-summary">Provide profile info and run recommendations to see targets.</div>
-      <div class="actions">
-        <button id="finalize-btn" type="button">Finalize &amp; View Shopping List</button>
-      </div>
-      <div id="shopping-info" style="margin-top:8px; font-size:13px; color:#cbd5e1;">Shopping list: not available yet.</div>
+    <div id="target-summary">Provide profile info and run recommendations to see targets.</div>
+    <div class="actions">
+      <button id="finalize-btn" class="primary-btn" style="margin-bottom: 30px">Finalize &amp; View Shopping List</button>
     </div>
-
+    <div id="shopping-info" style="margin-top:8px; font-size:13px">Shopping list: not available yet.</div>
 </div>
 
     <div class="card">
@@ -320,7 +316,7 @@ select:focus {
       <h1>Refine Recommendations</h1>
       <div class="actions">
         <input id="refine-input" placeholder="E.g., prefer yogurt over oats, avoid almonds" style="width: 500px; padding:10px; border-radius:10px; border:1px solid; color:var(--text);" />
-        <button id="refine-btn" type="button">Refine</button>
+        <button id="refine-btn" class="primary-btn">Refine</button>
       </div>
     </div>
 
@@ -328,7 +324,7 @@ select:focus {
       <h1>Image to Recipe</h1>
       <div class="upload">
         <input type="file" id="image-file" accept="image/*" />
-        <button id="upload-btn" type="button">Upload &amp; Describe</button>
+        <button id="upload-btn" class="primary-btn">Upload &amp; Describe</button>
         <div id="upload-status" style="margin-top:8px; font-size:13px; color:white;"> Idle</div>
       </div>
       <pre id="upload-output">No image uploaded.</pre>
@@ -634,7 +630,7 @@ select:focus {
 
     if (finalizeBtn) {
       finalizeBtn.addEventListener('click', async () => {
-        const backend = document.getElementById('backend').value || 'http://localhost:8000';
+        const backend = document.getElementById('backend')?.value || 'http://localhost:8000';
         if (!lastShoppingList || !Array.isArray(lastShoppingList) || !lastShoppingList.length) {
           alert('No shopping list available yet. Please run recommendations first.');
           return;
