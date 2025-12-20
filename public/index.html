@@ -3,139 +3,654 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Nutrition Planner Demo</title>
+  <title>MacroCart Demo</title>
   <style>
-    :root { --bg: #0c1220; --card: #141c2c; --accent: #4fd1c5; --text: #e8edf6; --muted: #9aa7bf; }
-    body { margin: 0; font-family: 'Inter', system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); display: flex; justify-content: center; padding: 24px; }
-    .container { width: min(1100px, 100%); }
-    h1 { margin: 0 0 8px; }
-    p { color: var(--muted); margin: 0 0 16px; }
-    .card { background: var(--card); border: 1px solid #1f2a40; border-radius: 14px; padding: 16px; margin-bottom: 16px; box-shadow: 0 10px 40px rgba(0,0,0,0.25); }
+    :root { background-color: black; }
+    html {
+  background: url('nutrition-background.jpg') no-repeat center / cover;
+  min-height: 100%;
+  background-attachment: fixed;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+}
+    body { 
+            color:black;
+            padding:120px;
+            
+      font-family: -apple-system, BlinkMacSystemFont, avenir next, avenir, segoe ui, helvetica neue, helvetica, Cantarell, Ubuntu, roboto, noto, arial, sans-serif;
+   }
+    .header {
+  padding: 60px 16px 100px;
+  font-size: 60px;
+  font-weight: 800;
+  color: black;
+  font-family: auto;
+}
+    .container { width: min(1200px, 100%); }
+    p { margin: 0 0 16px; }
+    .card 
+    {
+      padding-top: 16px; 
+      padding: 20px;
+    }
     form { display: grid; grid-template-columns: repeat(auto-fit,minmax(240px,1fr)); gap: 12px; }
-    label { display: flex; flex-direction: column; font-size: 14px; gap: 6px; }
-    input, select { padding: 10px; border-radius: 10px; border: 1px solid #1f2a40; background: #10182a; color: var(--text); }
-    button { background: var(--accent); color: #0c1220; border: none; padding: 12px 16px; border-radius: 10px; font-weight: 600; cursor: pointer; width: 200px; }
+   
+    button { background: #648691; color: #fff; border: none; padding: 12px 16px; border-radius: 10px; font-weight: 600; cursor: pointer; }
     button:disabled { opacity: 0.6; cursor: not-allowed; }
-    .actions { display: flex; gap: 12px; align-items: center; margin-top: 12px; }
-    pre { background: #0d1424; border: 1px solid #1f2a40; padding: 14px; border-radius: 12px; color: #cbd5e1; overflow: auto; max-height: 420px; }
-    .tag { display: inline-block; background: #1f2a40; color: var(--muted); padding: 4px 8px; border-radius: 8px; font-size: 12px; margin-right: 6px; }
+    .actions { display: flex; gap: 12px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+    .dish-card {  background: #afb9c4; color: black; border: 1px solid #e5e7eb; border-radius: 12px; padding: 12px; margin: 12px; box-shadow: 0 6px 18px rgba(0,0,0,0.08); width: 400px;}
+    .dish-img { height: 160px; border-radius: 10px; margin-bottom: 10px; }
+    .upload { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    pre { background: #f3f4f6; border: 1px solid #e5e7eb; padding: 12px; border-radius: 10px; color: #111827; overflow: auto; max-height: 320px; }
+  .profile-card {
+  border-radius: 20px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.section {
+  margin-bottom: 28px;
+}
+
+.header {
+  font-size: 50px;;
+}
+
+.grid-4 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+label {
+  font-size: 18px;
+  font-weight: 600;
+  text-transform: capitalize;
+  letter-spacing: 0.02em;
+  display: flex;
+  flex-direction: column;
+  color: black;
+}
+
+input,
+select {
+  margin-top: 6px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-size: 14px;
+    background: #ffffff61;
+}
+
+input:focus,
+select:focus {
+  outline: none;
+  border-color: rgb(124, 209, 235);
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.15);
+}
+
+.primary-btn {
+ background: #648691;
+  color: white;
+  padding: 14px 28px;
+  border-radius: 14px;
+  font-size: 17px;
+  font-weight: 700;
+  border: none;
+  cursor: pointer;
+}
+
+.primary-btn:hover {
+  transform: translateY(-1px);
+}
+
+.dish-card.compact {
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.dish-card.compact:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 30px rgba(0,0,0,0.12);
+}
+
+.dish-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.dish-title {
+  margin: 4px 0 0;
+  font-size: 18px;
+}
+
+.dish-meal {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: #64748b;
+  text-transform: uppercase;
+}
+
+.dish-time {
+  background: #f1f5f9;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.macro-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.macro-grid div {
+  background: #d1dce0;
+  border-radius: 12px;
+  padding: 10px;
+  text-align: center;
+}
+
+.macro-grid span {
+  display: block;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.view-recipe {
+  font-weight: 600;
+  margin-top: 10px;
+}
+
+.recipe {
+  margin-top: 12px;
+  animation: fadeIn 0.2s ease;
+}
+
+.hidden {
+  display: none;
+}
+
+#model_id{
+  width: 200px;
+}
+
+#dish-cards {
+     display: flex;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
   </style>
 </head>
 <body>
+  <div class="header">🥗 MacroCart - A one stop shop for your nutrition needs </div>
   <div class="container">
     <div class="card">
-      <h1>Nutrition Planner</h1>
-      <p>Backend defaults to <code>http://localhost:8000</code>. Enable LLM if you have Ollama running and <code>OLLAMA_MODEL</code> set.</p>
-      <label>Backend URL
-        <input id="backend" value="http://localhost:8000" />
-      </label>
-    </div>
-
-    <div class="card">
-      <div class="tag">Profile & Preferences</div>
-      <form id="planner-form">
-        <label>Height (cm)
-          <input id="height_cm" type="number" value="175" required />
-        </label>
-        <label>Weight (kg)
-          <input id="weight_kg" type="number" value="70" required />
-        </label>
-        <label>Age
-          <input id="age" type="number" value="30" required />
-        </label>
-        <label>Sex
-          <select id="sex">
-            <option value="male">Male</option>
-            <option value="female">Female</option>
-          </select>
-        </label>
-        <label>Activity
-          <select id="activity">
-            <option value="moderate">Moderate</option>
-            <option value="sedentary">Sedentary</option>
-            <option value="light">Light</option>
-            <option value="heavy">Heavy</option>
-            <option value="athlete">Athlete</option>
-          </select>
-        </label>
-        <label>Dietary Preference
-          <select id="diet">
-            <option value="omnivore">Omnivore</option>
-            <option value="vegetarian">Vegetarian</option>
-            <option value="vegan">Vegan</option>
-            <option value="pescatarian">Pescatarian</option>
-            <option value="keto">Keto</option>
-            <option value="paleo">Paleo</option>
-          </select>
-        </label>
-        <label>Meals per day
-          <input id="meals_per_day" type="number" min="1" max="6" value="3" />
-        </label>
-        <label>Budget amount
-          <input id="budget_amount" type="number" step="0.01" value="100" />
-        </label>
-        <label>Budget period
-          <select id="budget_period">
-            <option value="week">Week</option>
-            <option value="month">Month</option>
-          </select>
-        </label>
-        <label>Use LLM (Ollama)
-          <select id="use_llm">
-            <option value="false">No</option>
-            <option value="true">Yes</option>
+        <label>Model (Hugging Face, OpenAI, or Ollama)
+          <select id="model_id">
+            <option value="">Use backend default</option>
           </select>
         </label>
       </form>
+    </div>
+
+    <div class="card profile-card">
+
+  <div class="section">
+    <h1 class="section-title">User Profile</h1>
+    <div class="grid-4">
+      <label>Height (cm)
+        <input id="height_cm" type="number" value="175" required />
+      </label>
+
+      <label>Weight (kg)
+        <input id="weight_kg" type="number" value="70" required />
+      </label>
+
+      <label>Age
+        <input id="age" type="number" value="30" required />
+      </label>
+
+      <label>Sex
+        <select id="sex">
+          <option value="male">Male</option>
+          <option value="female">Female</option>
+        </select>
+      </label>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Preferences</div>
+    <div class="grid-4">
+      <label>Activity
+        <select id="activity">
+          <option value="moderate">Moderate</option>
+          <option value="sedentary">Sedentary</option>
+          <option value="light">Light</option>
+          <option value="heavy">Heavy</option>
+          <option value="athlete">Athlete</option>
+        </select>
+      </label>
+
+      <label>Dietary Preference
+        <select id="diet">
+          <option value="omnivore">Omnivore</option>
+          <option value="vegetarian">Vegetarian</option>
+          <option value="vegan">Vegan</option>
+          <option value="pescatarian">Pescatarian</option>
+          <option value="keto">Keto</option>
+          <option value="paleo">Paleo</option>
+        </select>
+      </label>
+
+      <label>Goal
+        <select id="goal">
+          <option value="fat_loss">Fat loss</option>
+          <option value="muscle_gain">Muscle gain</option>
+          <option value="maintenance" selected>Maintenance</option>
+        </select>
+      </label>
+
+      <label>Cuisine
+        <select id="cuisine">
+          <option value="">Any</option>
+          <option value="italian">Italian</option>
+          <option value="indian">Indian</option>
+          <option value="mexican">Mexican</option>
+          <option value="thai">Thai</option>
+          <option value="japanese">Japanese</option>
+          <option value="mediterranean">Mediterranean</option>
+        </select>
+      </label>
+
+      <label>Meals per day
+        <input id="meals_per_day" type="number" min="1" max="6" value="3" />
+      </label>
+
+      <label>Budget amount
+        <input id="budget_amount" type="number" step="0.01" value="100" />
+      </label>
+
+      <label>Allergies
+        <input id="allergies" placeholder="peanut, dairy" />
+      </label>
+
+      <label>Recommendation period
+        <select id="period">
+          <option value="one_day">1 day</option>
+          <option value="seven_days">7 days</option>
+        </select>
+      </label>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button id="recommend" class="primary-btn" style="margin-bottom: 30px">Recommend Dishes</button>
+  </div>
+    <div id="target-summary">Provide profile info and run recommendations to see targets.</div>
+    <div class="actions">
+      <button id="finalize-btn" class="primary-btn" style="margin-bottom: 30px">Finalize &amp; View Shopping List</button>
+    </div>
+    <div id="shopping-info" style="margin-top:8px; font-size:13px">Shopping list: not available yet.</div>
+</div>
+
+    <div class="card">
+      <h1>Dish Recommendations</h1>
+      <div id="dish-cards">Waiting for recommendations...</div>
+    </div>
+
+    <div class="card">
+      <h1>Refine Recommendations</h1>
       <div class="actions">
-        <button id="submit">Generate Plan</button>
-        <span id="status" class="tag">Idle</span>
+        <input id="refine-input" placeholder="E.g., prefer yogurt over oats, avoid almonds" style="width: 500px; padding:10px; border-radius:10px; border:1px solid; color:var(--text);" />
+        <button id="refine-btn" class="primary-btn">Refine</button>
       </div>
     </div>
 
     <div class="card">
-      <div class="tag">Response</div>
-      <pre id="output">Waiting for response...</pre>
+      <h1>Image to Recipe</h1>
+      <div class="upload">
+        <input type="file" id="image-file" accept="image/*" />
+        <button id="upload-btn" class="primary-btn">Upload &amp; Describe</button>
+        <div id="upload-status" style="margin-top:8px; font-size:13px; color:white;"> Idle</div>
+      </div>
+      <pre id="upload-output">No image uploaded.</pre>
     </div>
   </div>
 
   <script>
-    const output = document.getElementById('output');
     const statusEl = document.getElementById('status');
-    const setStatus = (txt) => { statusEl.textContent = txt; };
+    const modelUsedEl = document.getElementById('model-used');
+    const setStatus = (txt) => { if (statusEl) statusEl.textContent = txt; };
+    const refineInput = document.getElementById('refine-input');
+    const refineBtn = document.getElementById('refine-btn');
+    const refineStatus = document.getElementById('refine-status');
+    const dishCards = document.getElementById('dish-cards');
+    const targetSummary = document.getElementById('target-summary');
+    const modelSelect = document.getElementById('model_id');
+    const finalizeBtn = document.getElementById('finalize-btn');
+    const shoppingInfo = document.getElementById('shopping-info');
+    let currentController = null;
+    let lastRecommendPayload = null;
+    let lastDishes = null;
+    let lastShoppingList = null;
+    let lastShoppingLinks = null;
 
-    document.getElementById('submit').addEventListener('click', async () => {
-      output.textContent = 'Loading...';
-      setStatus('Loading...');
-      const backend = document.getElementById('backend').value || 'http://localhost:8000';
-      const payload = {
-        profile: {
+  function renderDishes(res) {
+    if (!dishCards) return;
+    if (!res || !Array.isArray(res.dishes)) {
+      dishCards.textContent = 'No dishes returned.';
+      return;
+  }
+
+  dishCards.innerHTML = '';
+
+  res.dishes.forEach((d, idx) => {
+    const card = document.createElement('div');
+    card.className = 'dish-card compact';
+    card.innerHTML = `
+      <div class="dish-header">
+        <div>
+          <span class="dish-meal">Day ${d.day || 1}</span>
+          <h3 class="dish-title">${d.name}</h3>
+        </div>
+        <span class="dish-time">${d.time_min || 15} min</span>
+      </div>
+
+      <div class="macro-grid">
+        <div><strong>${d.calories || '-'} kcal</strong><span>Calories</span></div>
+        <div><strong>${d.protein_g || '-'} g</strong><span>Protein</span></div>
+        <div><strong>${d.carbs_g || '-'} g</strong><span>Carbs</span></div>
+        <div><strong>${d.fat_g || '-'} g</strong><span>Fat</span></div>
+      </div>
+
+      <div class="view-recipe">View Recipe ▾</div>
+
+      <div class="recipe hidden">
+        <p><strong>Ingredients:</strong> ${d.ingredients_used.join(', ')}</p>
+        ${d.steps?.length ? `<ol>${d.steps.map(s => `<li>${s}</li>`).join('')}</ol>` : ''}
+      </div>
+    `;
+
+    card.addEventListener('click', () => {
+      card.classList.toggle('open');
+      card.querySelector('.recipe').classList.toggle('hidden');
+      card.querySelector('.view-recipe').textContent =
+        card.classList.contains('open') ? 'Hide Recipe ▴' : 'View Recipe ▾';
+    });
+
+    dishCards.appendChild(card);
+  });
+}
+
+    function renderTargets(res) {
+      if (!targetSummary) return;
+      if (!res) {
+        targetSummary.textContent = 'No target data.';
+        return;
+      }
+      const model = res.model_provider || 'unknown';
+      const params = res.model_parameters ? `${res.model_parameters.toLocaleString()} params` : '';
+      if (!res.target_calories) {
+        targetSummary.innerHTML = `
+          <p>No profile provided, so targets are not calculated.</p>
+        `;
+        return;
+      }
+      targetSummary.innerHTML = `
+        Daily targets: ${res.target_calories} kcal, Protein ${res.target_protein_g}g, Carbs ${res.target_carbs_g}g, Fat ${res.target_fat_g}g
+      `;
+    }
+
+    function renderShoppingLinks(res) {
+      if (!shoppingInfo) return;
+      const links = res && res.shopping_links ? res.shopping_links : null;
+      const list = res && res.shopping_list ? res.shopping_list : null;
+      if (!links && (!list || !list.length)) {
+        shoppingInfo.textContent = 'Shopping list: not available yet.';
+        return;
+      }
+      let html = '';
+      if (links && links.shopping_list_url) {
+        html += `<p><a href="${links.shopping_list_url}" target="_blank">Open Instacart list</a></p>`;
+      } else {
+        html += '<p>No Instacart URL (missing/failed API); using local items.</p>';
+      }
+      const products = links && links.product_links ? links.product_links : [];
+      const preview = (products.length ? products : (list || [])).slice(0, 5);
+      if (preview.length) {
+        html += '<ul style="padding-left:18px;margin:6px 0;">' +
+          preview.map(p => {
+            const name = p.search_term || p.name || '';
+            const qty = p.quantity ? ` (${p.quantity} ${p.unit || ''})` : '';
+            return `<li>${name}${qty}</li>`;
+          }).join('') +
+          '</ul>';
+      }
+      shoppingInfo.innerHTML = html;
+    }
+
+    async function loadModelOptions(backend) {
+      if (!modelSelect) return;
+      try {
+        const previous = modelSelect.value;
+        const resp = await fetch(`${backend}/models`);
+        const data = await resp.json();
+        const optionMap = new Map();
+        const addOption = (value, label) => {
+          if (!value) return;
+          const key = `${label}:${value}`;
+          if (!optionMap.has(key)) optionMap.set(key, { value: key, text: `[${label}] ${value}` });
+        };
+        (data.hf_models || []).forEach(m => addOption(m, 'hf'));
+        (data.openai_models || []).forEach(m => addOption(m, 'openai'));
+        (data.ollama_models || []).forEach(m => addOption(m, 'ollama'));
+        addOption(data.hf_model_id, 'hf');
+        addOption(data.openai_model, 'openai');
+        addOption(data.ollama_recipe_model, 'ollama');
+        addOption(data.ollama_model, 'ollama');
+        modelSelect.innerHTML = '<option value="">Use backend default</option>' +
+          Array.from(optionMap.values()).map(o => `<option value="${o.value}">${o.text}</option>`).join('');
+        if (previous && Array.from(optionMap.values()).some(o => o.value === previous)) {
+          modelSelect.value = previous;
+        } else if (data.defaults && data.defaults.openai) {
+          modelSelect.value = `openai:${data.defaults.openai}`;
+        } else if (data.defaults && data.defaults.hf) {
+          modelSelect.value = `hf:${data.defaults.hf}`;
+        } else if (data.defaults && data.defaults.ollama) {
+          modelSelect.value = `ollama:${data.defaults.ollama}`;
+        }
+      } catch (e) {
+        // ignore; still allow manual entry
+      }
+    }
+
+    const recommendBtn = document.getElementById('recommend');
+    loadModelOptions(document.getElementById('backend')?.value || 'http://localhost:8000');
+    if (recommendBtn) {
+      recommendBtn.addEventListener('click', async () => {
+        if (currentController) currentController.abort();
+        const controller = new AbortController();
+        currentController = controller;
+        if (dishCards) dishCards.textContent = 'Loading...';
+        setStatus('Loading recommend...');
+        const backendInput = document.getElementById('backend');
+        const backend = backendInput?.value || 'http://localhost:8000';
+        await loadModelOptions(backend);
+        const profile = {
           height_cm: Number(document.getElementById('height_cm').value),
           weight_kg: Number(document.getElementById('weight_kg').value),
           age: Number(document.getElementById('age').value),
           sex: document.getElementById('sex').value,
           activity_level: document.getElementById('activity').value
-        },
-        dietary_preference: document.getElementById('diet').value,
-        budget_amount: Number(document.getElementById('budget_amount').value),
-        budget_period: document.getElementById('budget_period').value,
-        meals_per_day: Number(document.getElementById('meals_per_day').value),
-        use_llm: document.getElementById('use_llm').value === 'true'
-      };
-      try {
-        const resp = await fetch(`${backend}/plan`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        const data = await resp.json();
-        output.textContent = JSON.stringify(data, null, 2);
-        setStatus(resp.ok ? 'OK' : 'Error');
-      } catch (err) {
-        output.textContent = `Error: ${err}`;
-        setStatus('Error');
-      }
-    });
+        };
+        const payload = {
+          ingredients: [],
+          dietary_preference: document.getElementById('diet').value,
+          goal: document.getElementById('goal').value,
+          cuisine: document.getElementById('cuisine').value,
+          allergies: document.getElementById('allergies').value.split(',').map(x => x.trim()).filter(Boolean),
+          period: document.getElementById('period').value,
+          meals_per_day: Number(document.getElementById('meals_per_day').value),
+          profile
+        };
+        lastRecommendPayload = payload;
+        const selectedModel = modelSelect ? modelSelect.value : '';
+        const selectedText = modelSelect && modelSelect.options[modelSelect.selectedIndex]
+          ? modelSelect.options[modelSelect.selectedIndex].textContent
+          : '(backend default)';
+        if (selectedModel.startsWith('hf:')) {
+          payload.hf_model_id = selectedModel.replace('hf:', '');
+        } else if (selectedModel.startsWith('ollama:')) {
+          payload.ollama_model = selectedModel.replace('ollama:', '');
+        } else if (selectedModel.startsWith('openai:')) {
+          payload.openai_model = selectedModel.replace('openai:', '');
+        }
+        if (modelUsedEl) modelUsedEl.textContent = `Requested: ${selectedText}`;
+        try {
+          const resp = await fetch(`${backend}/recommend`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            signal: controller.signal,
+          });
+          const data = await resp.json();
+          if (controller !== currentController || controller.signal.aborted) return;
+          if (!resp.ok) {
+            const detail = data && (data.detail || data.error || JSON.stringify(data));
+            dishCards.textContent = `Error from backend: ${detail}`;
+            setStatus('Error');
+            return;
+          }
+          renderDishes(data);
+          renderTargets(data);
+          renderShoppingLinks(data);
+          lastDishes = data.dishes || [];
+          lastRecommendPayload = payload;
+          lastShoppingList = data.shopping_list || null;
+          lastShoppingLinks = data.shopping_links || null;
+          const usedProvider = data.model_provider || 'unknown';
+          if (modelUsedEl) modelUsedEl.textContent = `Used: ${usedProvider}`;
+          setStatus(`OK (${usedProvider})`);
+        } catch (err) {
+          if (err && err.name === 'AbortError') return;
+          if (dishCards) dishCards.textContent = `Error: ${err}`;
+          setStatus('Error');
+        } finally {
+          if (controller === currentController) currentController = null;
+        }
+      });
+    }
+
+    const uploadBtn = document.getElementById('upload-btn');
+    const uploadStatus = document.getElementById('upload-status');
+    const uploadOutput = document.getElementById('upload-output');
+    if (uploadBtn) {
+      uploadBtn.addEventListener('click', async () => {
+        const fileInput = document.getElementById('image-file');
+        if (!fileInput || !fileInput.files || !fileInput.files.length) {
+          if (uploadStatus) uploadStatus.textContent = 'No file selected';
+          return;
+        }
+        const backend = document.getElementById('backend')?.value || 'http://localhost:8000';
+        const form = new FormData();
+        form.append('file', fileInput.files[0]);
+        const selectedModel = modelSelect ? modelSelect.value : '';
+        if (selectedModel.startsWith('hf:')) {
+          form.append('hf_model_id', selectedModel.replace('hf:', ''));
+        } else if (selectedModel.startsWith('ollama:')) {
+          form.append('ollama_model', selectedModel.replace('ollama:', ''));
+        } else if (selectedModel.startsWith('openai:')) {
+          form.append('openai_model', selectedModel.replace('openai:', ''));
+        }
+        if (uploadStatus) uploadStatus.textContent = 'Uploading...';
+        try {
+          const resp = await fetch(`${backend}/image-recipe`, { method: 'POST', body: form });
+          const data = await resp.json();
+          uploadOutput.textContent = JSON.stringify(data, null, 2);
+          uploadStatus.textContent = resp.ok ? 'Done' : 'Error';
+        } catch (e) {
+          uploadOutput.textContent = `Error: ${e}`;
+          if (uploadStatus) uploadStatus.textContent = 'Error';
+        }
+      });
+    }
+
+    if (refineBtn) {
+      refineBtn.addEventListener('click', async () => {
+        if (!lastDishes || !Array.isArray(lastDishes) || !lastDishes.length) {
+          if (refineStatus) refineStatus.textContent = 'Run recommendations first.';
+          return;
+        }
+        const backend = document.getElementById('backend')?.value || 'http://localhost:8000';
+        const feedback = refineInput ? refineInput.value : '';
+        if (!feedback.trim()) {
+          if (refineStatus) refineStatus.textContent = 'Enter feedback.';
+          return;
+        }
+        const body = { feedback, dishes: lastDishes, request: lastRecommendPayload || {} };
+        if (refineStatus) refineStatus.textContent = 'Refining...';
+        try {
+          const resp = await fetch(`${backend}/recommend/refine`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+          const data = await resp.json();
+          if (!resp.ok) {
+            const detail = data && (data.detail || data.error || JSON.stringify(data));
+            if (refineStatus) refineStatus.textContent = `Error: ${detail}`;
+            return;
+          }
+          lastDishes = data.dishes || [];
+          lastShoppingList = data.shopping_list || lastShoppingList;
+          lastShoppingLinks = data.shopping_links || lastShoppingLinks;
+          renderDishes(data);
+          renderTargets(data);
+          renderShoppingLinks(data);
+          if (refineStatus) refineStatus.textContent = `Refined with ${data.model_provider || 'unknown'}`;
+        } catch (e) {
+          if (refineStatus) refineStatus.textContent = `Error: ${e}`;
+        } finally {
+          if (refineStatus && (!refineStatus.textContent || refineStatus.textContent.startsWith('Refining'))) {
+            refineStatus.textContent = 'Idle';
+          }
+        }
+      });
+    }
+
+    if (finalizeBtn) {
+      finalizeBtn.addEventListener('click', async () => {
+        const backend = document.getElementById('backend')?.value || 'http://localhost:8000';
+        if (!lastShoppingList || !Array.isArray(lastShoppingList) || !lastShoppingList.length) {
+          alert('No shopping list available yet. Please run recommendations first.');
+          return;
+        }
+        try {
+          const resp = await fetch(`${backend}/shopping-list/render`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              shopping_list: lastShoppingList,
+              shopping_links: lastShoppingLinks,
+              title: 'Your Grocery List'
+            })
+          });
+          const html = await resp.text();
+          if (!resp.ok) {
+            alert(`Error rendering shopping list: ${html}`);
+            return;
+          }
+          // Open via blob URL to preserve content and reduce popup blocking.
+          const blob = new Blob([html], { type: 'text/html' });
+          const url = URL.createObjectURL(blob);
+          window.open(url, '_blank');
+        } catch (e) {
+          alert(`Error rendering shopping list: ${e}`);
+        }
+      });
+    }
   </script>
 </body>
 </html>

@@ -1,3 +1,15 @@
 fastapi==0.111.0
 uvicorn==0.30.3
 requests==2.32.3
+langchain==0.2.6
+langchain-community==0.2.6
+langchain-huggingface>=0.0.6
+langchain-chroma>=0.1.0
+chromadb==0.5.3
+sentence-transformers==2.7.0
+transformers>=4.41.0,<5
+sentencepiece>=0.1.99
+torch>=2.3.0
+pandas==2.2.2
+openpyxl==3.1.5
+openai>=1.35.0
