@@ -3,10 +3,9 @@ import json
 import urllib.parse
 import os
 
-# Configuration
-# API_KEY = os.getenv("INSTACART_API_KEY")
+#Configuration
+API_KEY = os.getenv("INSTACART_API_KEY")
 
-API_KEY = "keys.aey4IdGLsXAYehcNXQWR7IiSrph999Qyo15OEehAWCM"
 API_HOST = "connect.dev.instacart.tools"
 
 def create_shopping_list_with_search_links(ingredients_list, title="My Shopping List"):
