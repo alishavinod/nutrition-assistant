@@ -100,8 +100,11 @@ class OpenAIRecipeClient:
             return None, "OpenAI SDK not available"
         model = self.model_id
         try:
-            resp = client.responses.create(model=model, input=prompt)
-            txt = resp.output_text
+            resp = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            txt = resp.choices[0].message.content
             _log_model_output(f"openai:{model}", txt)
             return txt, None
         except Exception as exc:
@@ -240,21 +243,258 @@ class IngredientInput(BaseModel):
     quantity: Optional[str] = None
     notes: Optional[str] = None
 
-class DishRecommendation(BaseModel):
-    day: int
+
+class IngredientCost(BaseModel):
     name: str
-    reason: str
-    ingredients_used: List[str]
-    steps: List[str] = Field(default_factory=list)
-    calories: Optional[int] = None
-    protein_g: Optional[int] = None
-    carbs_g: Optional[int] = None
-    fat_g: Optional[int] = None
+    quantity: Optional[float] = None
+    unit: Optional[str] = None
+    cost: Optional[float] = None
+    
+    class Config:
+        json_encoders = {
+            float: lambda v: round(v, 2) if v is not None else None
+        }
+
 
 class ShoppingItem(BaseModel):
     name: str
     quantity: Optional[float] = None
     unit: Optional[str] = None
+    cost: Optional[float] = None
+    
+    class Config:
+        json_encoders = {
+            float: lambda v: round(v, 2) if v is not None else None
+        }
+
+
+class DishRecommendation(BaseModel):
+    day: int
+    name: str
+    reason: str
+    ingredients_used: List[str]
+    ingredients: Optional[List[IngredientCost]] = None
+    steps: List[str] = Field(default_factory=list)
+    calories: Optional[int] = None
+    protein_g: Optional[int] = None
+    carbs_g: Optional[int] = None
+    fat_g: Optional[int] = None
+    estimated_cost: Optional[float] = None
+    
+    class Config:
+        json_encoders = {
+            float: lambda v: round(v, 2) if v is not None else None
+        }
+
+
+def _parse_quantity_with_unit(raw_quantity) -> Tuple[Optional[float], str]:
+    """
+    Parse a quantity that may include a unit (e.g., "100g", "2 cups", "1.5 lb").
+    Returns (numeric_value, unit_string).
+    If no numeric part found, returns (None, original_string).
+    """
+    if raw_quantity is None:
+        return None, ""
+    
+    if isinstance(raw_quantity, (int, float)):
+        return float(raw_quantity), ""
+    
+    if not isinstance(raw_quantity, str):
+        raw_quantity = str(raw_quantity)
+    
+    raw_quantity = raw_quantity.strip()
+    
+    # Try to match number followed by optional unit
+    # Supports: "100g", "2 cups", "1.5 lb", "1/2 tsp"
+    match = re.match(r'\s*([\d./]+)\s*([a-zA-Z]*)\s*$', raw_quantity)
+    if match:
+        num_str, unit = match.groups()
+        try:
+            # Handle fractions like "1/2"
+            if '/' in num_str:
+                parts = num_str.split('/')
+                num_val = float(parts[0]) / float(parts[1])
+            else:
+                num_val = float(num_str)
+            return num_val, unit or ""
+        except (ValueError, ZeroDivisionError):
+            return None, raw_quantity
+    
+    return None, raw_quantity
+
+
+def _format_quantity_with_unit(quantity: Optional[float], unit: Optional[str]) -> str:
+    """
+    Format quantity and unit as a single string (e.g., "100g", "2 cups").
+    """
+    if quantity is None:
+        return unit or ""
+    
+    unit = (unit or "").strip()
+    
+    # Format the number nicely (remove unnecessary decimals)
+    if quantity == int(quantity):
+        qty_str = str(int(quantity))
+    else:
+        qty_str = f"{quantity:.1f}".rstrip('0').rstrip('.')
+    
+    if unit:
+        return f"{qty_str}{unit}" if unit in ['g', 'kg', 'ml', 'l'] else f"{qty_str} {unit}"
+    
+    return qty_str
+
+
+def _clean_item_name(name: str) -> str:
+    """
+    Remove trailing quantity/unit text from an ingredient name (e.g., 'salmon 1 piece' -> 'salmon').
+    """
+    cleaned = re.sub(r"\s+\d+(?:\.\d+)?\s*[a-zA-Z]*$", "", name or "").strip()
+    return cleaned or name
+
+
+def _coerce_number(val) -> Optional[float]:
+    """
+    Convert numeric-looking strings (e.g., "20g", "500 kcal") to floats.
+    """
+    if val is None:
+        return None
+    if isinstance(val, (int, float)):
+        return float(val)
+    if isinstance(val, str):
+        # Extract just the numeric part
+        num_val, _ = _parse_quantity_with_unit(val)
+        return num_val
+    return None
+
+
+def _normalize_shopping_items(items: Optional[List[ShoppingItem]]) -> List[ShoppingItem]:
+    """
+    Ensure every shopping item has a numeric quantity and a unit. Defaults: quantity=1, unit="" (no forced 'piece').
+    """
+    normalized: List[ShoppingItem] = []
+    if not items:
+        return normalized
+    for itm in items:
+        qty_val = _coerce_number(itm.quantity)
+        if qty_val is None:
+            qty_val = 1.0
+        unit = (itm.unit or "").strip()
+        cost_val = _coerce_number(itm.cost)
+        normalized.append(ShoppingItem(name=_clean_item_name(itm.name), quantity=qty_val, unit=unit, cost=cost_val))
+    return normalized
+
+
+def _parse_ingredient_from_dict(ing_dict: dict) -> IngredientCost:
+    """
+    Parse an ingredient dictionary ensuring quantity and unit are properly separated.
+    """
+    name = str(ing_dict.get("name") or ing_dict.get("item") or "")
+    raw_qty = ing_dict.get("quantity")
+    raw_unit = ing_dict.get("unit") or ""
+    raw_cost = ing_dict.get("cost")
+    
+    # Parse quantity - it might be a string with unit like "100g" or "2 cups"
+    qty_val, parsed_unit = _parse_quantity_with_unit(raw_qty)
+    
+    # If unit wasn't in quantity string, use the separate unit field
+    if not parsed_unit and raw_unit:
+        parsed_unit = str(raw_unit).strip()
+    
+    # Parse cost
+    cost_val = _coerce_number(raw_cost)
+    
+    return IngredientCost(
+        name=name,
+        quantity=qty_val,
+        unit=parsed_unit,
+        cost=cost_val,
+    )
+
+
+def _build_shopping_from_dishes(dishes: List[DishRecommendation]) -> List[dict]:
+    """
+    Fallback: derive shopping items from dish ingredients_used when the model
+    does not return an explicit shopping_list. Quantities default to 1, unit empty.
+    """
+    if not dishes:
+        return []
+    seen = set()
+    items: List[dict] = []
+    for dish in dishes:
+        # Prefer structured ingredients if available
+        if dish.ingredients:
+            for ing in dish.ingredients:
+                name = _clean_item_name((ing.name or "").strip())
+                key = name.lower()
+                if not name or key in seen:
+                    continue
+                seen.add(key)
+                cost_val = _coerce_number(ing.cost)
+                qty_val = _coerce_number(ing.quantity)
+                if qty_val is None:
+                    qty_val = 1.0
+                items.append({
+                    "name": name,
+                    "quantity": qty_val,
+                    "unit": ing.unit or "",
+                    "cost": cost_val,
+                })
+            continue
+        for ing in dish.ingredients_used:
+            name = _clean_item_name(ing.strip())
+            key = name.lower()
+            if not name or key in seen:
+                continue
+            seen.add(key)
+            items.append({"name": name, "quantity": 1, "unit": ""})
+    return items
+
+
+def _build_shopping_from_dishes_ingredients(dishes_list: list) -> List[ShoppingItem]:
+    """
+    Aggregate shopping items from dish ingredients, summing quantities by name+unit.
+    """
+    # Dictionary to aggregate: key = (name.lower(), unit), value = [total_qty, total_cost, original_name]
+    aggregated: Dict[Tuple[str, str], List] = {}
+    
+    for dish in dishes_list:
+        if not isinstance(dish, dict):
+            continue
+            
+        ingredients = dish.get("ingredients") or []
+        for ing in ingredients:
+            if not isinstance(ing, dict):
+                continue
+                
+            ing_parsed = _parse_ingredient_from_dict(ing)
+            if not ing_parsed.name:
+                continue
+            
+            key = (ing_parsed.name.lower(), ing_parsed.unit or "")
+            
+            if key in aggregated:
+                # Sum quantities and costs
+                aggregated[key][0] += (ing_parsed.quantity or 0)
+                aggregated[key][1] += (ing_parsed.cost or 0)
+            else:
+                # New entry: [quantity, cost, display_name]
+                aggregated[key] = [
+                    ing_parsed.quantity or 0,
+                    ing_parsed.cost or 0,
+                    ing_parsed.name
+                ]
+    
+    # Convert to ShoppingItem list
+    items = []
+    for (name_lower, unit), [total_qty, total_cost, display_name] in aggregated.items():
+        items.append(ShoppingItem(
+            name=display_name,
+            quantity=round(total_qty, 2) if total_qty else None,
+            unit=unit or None,
+            cost=round(total_cost, 2) if total_cost else None
+        ))
+    
+    return items
 
 
 class ShoppingLinksRequest(BaseModel):
@@ -292,6 +532,7 @@ class RecommendationResponse(BaseModel):
     cuisine: Optional[str] = None
     shopping_list: Optional[List[ShoppingItem]] = None
     shopping_links: Optional[dict] = None
+    total_shopping_cost: Optional[float] = None
 
 
 class RefineRequest(BaseModel):
@@ -333,30 +574,6 @@ def compute_targets(req: PlanRequest) -> dict:
     }
 
 
-# def compute_recommendation_targets(
-#     profile: Profile, macro_split: MacroSplit, target_calories: Optional[int]
-# ) -> dict:
-#     """
-#     Compute calorie/macro targets for recommendations using the same logic as plans.
-#     """
-#     bmr = mifflin_st_jeor(profile)
-#     tdee = bmr * profile.activity_level.multiplier
-#     calories = int(target_calories or round(tdee))
-
-#     protein_cal = calories * (macro_split.protein_pct / 100)
-#     carbs_cal = calories * (macro_split.carbs_pct / 100)
-#     fat_cal = calories * (macro_split.fat_pct / 100)
-
-#     return {
-#         "calories": calories,
-#         "protein_g": int(protein_cal / 4),
-#         "carbs_g": int(carbs_cal / 4),
-#         "fat_g": int(fat_cal / 9),
-#     }
-
-
-from typing import Optional, Dict
-
 KCAL_PER_GRAM = {
     "protein": 4,
     "carbs": 4,
@@ -369,48 +586,6 @@ GOAL_CALORIE_MULTIPLIER = {
     "bulk": 1.10,
 }
 
-
-# def compute_recommendation_targets(
-#     profile: Profile,
-#     macro_split: MacroSplit,
-#     target_calories: Optional[int] = None,
-#     goal: Optional[Goal] = Goal.maintenance,
-# ) -> Dict[str, int]:
-#     """
-#     Compute daily calorie and macro targets for recipe / meal recommendations.
-
-#     Output is intentionally minimal and stable so it can be reused
-#     across planners, recommenders, and grocery generators.
-#     """
-
-#     # 1. Base calories
-#     bmr = mifflin_st_jeor(profile)
-#     tdee = bmr * profile.activity_level.multiplier
-
-#     base_calories = target_calories or round(tdee)
-
-#     # 2. Goal adjustment (maintenance / cut / bulk)
-#     goal_label = (goal.value if isinstance(goal, Goal) else goal or "maintenance").lower()
-#     calorie_multiplier = GOAL_CALORIE_MULTIPLIER.get(goal_label, 1.0)
-
-#     calories = int(round(base_calories * calorie_multiplier))
-
-#     # 3. Macro calories
-#     protein_cal = calories * (macro_split.protein_pct / 100)
-#     carbs_cal = calories * (macro_split.carbs_pct / 100)
-#     fat_cal = calories * (macro_split.fat_pct / 100)
-
-#     # 4. Convert to grams
-#     protein_g = round(protein_cal / KCAL_PER_GRAM["protein"])
-#     carbs_g = round(carbs_cal / KCAL_PER_GRAM["carbs"])
-#     fat_g = round(fat_cal / KCAL_PER_GRAM["fat"])
-
-#     return {
-#         "calories": calories,
-#         "protein_g": int(protein_g),
-#         "carbs_g": int(carbs_g),
-#         "fat_g": int(fat_g),
-#     }
 
 def compute_recommendation_targets(
     profile: Profile,
@@ -498,6 +673,11 @@ def _get_last_ollama_error() -> Optional[str]:
 def _parse_json_block(raw: str) -> Optional[dict]:
     """Attempt to parse JSON; tolerate leading/trailing prose or code fences."""
     try:
+        sanitized = _sanitize_jsonish(raw)
+        return json.loads(sanitized)
+    except Exception:
+        pass
+    try:
         return json.loads(raw)
     except Exception:
         pass
@@ -506,7 +686,7 @@ def _parse_json_block(raw: str) -> Optional[dict]:
     if start != -1 and end != -1 and end > start:
         snippet = raw[start : end + 1]
         try:
-            return json.loads(snippet)
+            return json.loads(_sanitize_jsonish(snippet))
         except Exception:
             return None
     return None
@@ -517,51 +697,76 @@ def _sanitize_jsonish(text: str) -> str:
     Best-effort cleanup for near-JSON (e.g., trailing commas).
     This is deliberately light-touch to avoid corrupting well-formed JSON.
     """
+    # Strip JS-style comments
+    text = re.sub(r"//.*", "", text)
     # Remove trailing commas before } or ]
-    text = re.sub(r",\\s*([}\\]])", r"\\1", text)
+    text = re.sub(r",\s*([}\]])", r"\1", text)
+    # Quote numeric-with-unit values like 20g or 1lb when used as values (e.g., "quantity": 20g)
+    text = re.sub(r'("quantity"\s*:\s*)(\d+(?:\.\d+)?)([a-zA-Z]+)', r'\1"\2\3"', text)
+    text = re.sub(r'("cost"\s*:\s*)(\d+(?:\.\d+)?)([a-zA-Z]+)', r'\1\2', text)
+
+    # Quote unquoted step strings (e.g., steps: [Do this., Do that.])
+    def _fix_steps(match: re.Match) -> str:
+        body = match.group(1)
+        items = []
+        for line in body.splitlines():
+            stripped = line.strip().rstrip(",")
+            if not stripped:
+                continue
+            if stripped.startswith('"'):
+                items.append(stripped.strip(","))
+            else:
+                items.append(json.dumps(stripped))
+        return '"steps": [\n  ' + ",\n  ".join(items) + "\n]"
+
+    text = re.sub(r'"steps"\s*:\s*\[(.*?)\]', _fix_steps, text, flags=re.DOTALL)
     return text
 
 
 def _extract_shopping_items(data: dict) -> List[ShoppingItem]:
     """
-    Parse shopping list style items from model JSON.
-    Accepts either top-level "shopping_list" or dish-level ingredients with quantities.
+    Parse shopping list items from model JSON with proper quantity/unit parsing.
     """
     if not isinstance(data, dict):
         return []
+        
     items: List[ShoppingItem] = []
     raw_list = data.get("shopping_list") or data.get("ingredients") or []
+    
     if isinstance(raw_list, list):
         for entry in raw_list:
-            name = entry.get("name") if isinstance(entry, dict) else None
+            if not isinstance(entry, dict):
+                continue
+                
+            name = entry.get("name")
             if not name:
                 continue
-            qty = entry.get("quantity") if isinstance(entry, dict) else None
-            unit = entry.get("unit") if isinstance(entry, dict) else None
-            try:
-                qty_val = float(qty) if qty is not None and str(qty).strip() != "" else None
-            except Exception:
-                qty_val = None
-            items.append(ShoppingItem(name=str(name), quantity=qty_val, unit=str(unit) if unit else None))
-    # If empty, attempt to backfill from dishes ingredients/ingredients_used.
+                
+            raw_qty = entry.get("quantity")
+            raw_unit = entry.get("unit")
+            raw_cost = entry.get("cost")
+            
+            # Parse quantity with unit
+            qty_val, parsed_unit = _parse_quantity_with_unit(raw_qty)
+            
+            # Use separate unit field if no unit in quantity
+            if not parsed_unit and raw_unit:
+                parsed_unit = str(raw_unit).strip()
+            
+            # Parse cost
+            cost_val = _coerce_number(raw_cost)
+            
+            items.append(ShoppingItem(
+                name=str(name),
+                quantity=qty_val,
+                unit=parsed_unit or None,
+                cost=cost_val
+            ))
+    
+    # Fallback: build from dish ingredients if no shopping list
     if not items and "dishes" in data and isinstance(data["dishes"], list):
-        for d in data["dishes"]:
-            ing_list = d.get("ingredients") or d.get("ingredients_used") or []
-            for ing in ing_list:
-                if isinstance(ing, dict):
-                    name = ing.get("name")
-                    if not name:
-                        continue
-                    qty = ing.get("quantity")
-                    unit = ing.get("unit")
-                    try:
-                        qty_val = float(qty) if qty is not None and str(qty).strip() != "" else None
-                    except Exception:
-                        qty_val = None
-                    items.append(ShoppingItem(name=str(name), quantity=qty_val, unit=str(unit) if unit else None))
-                else:
-                    if ing:
-                        items.append(ShoppingItem(name=str(ing)))
+        items = _build_shopping_from_dishes_ingredients(data["dishes"])
+    
     return items
 
 
@@ -581,33 +786,132 @@ def _build_recommendation_prompt(
     per_meal_protein = None
     per_meal_carbs = None
     per_meal_fat = None
-    # Rough per-meal macros (helps the model keep totals closer to targets)
+    
     if req.profile:
         targets = compute_recommendation_targets(req.profile, req.macro_split, req.target_calories, req.goal)
         per_meal_cal = max(200, int(targets["calories"] / req.meals_per_day))
         per_meal_protein = max(10, int(targets["protein_g"] / req.meals_per_day))
         per_meal_carbs = max(10, int(targets["carbs_g"] / req.meals_per_day))
         per_meal_fat = max(5, int(targets["fat_g"] / req.meals_per_day))
+    
     day_prompt = (
         f"Return exactly {needed_dishes} dishes with day numbers cycling 1..{days}; ensure day 1 and day {days} are present and avoid repeating dish names."
         if days > 1
         else f"Return exactly {needed_dishes} dishes for day 1."
     )
     cuisine_txt = f"Preferred cuisine: {req.cuisine}." if req.cuisine else "Cuisine: flexible."
+    
     return f"""
 You are a nutrition chef. Recommend simple dishes ONLY using these ingredients: {ingredients_txt}.
 Diet: {req.dietary_preference.value}. Goal: {req.goal.replace('_',' ')} (make sure dishes honor this: fat_loss => lighter calories, muscle_gain => higher protein, maintenance => balanced). Allergies: {allergies_txt}.
 User profile: {profile_txt}. Targets: {targets_txt}. Budget: {budget_txt} ({budget_per_day}); favor affordable ingredients.
 {cuisine_txt}
+
 If profile is provided, aim for each dish to be roughly ~{per_meal_cal or 'target/meal'} kcal, Protein ~{per_meal_protein or 'target/meal'}g, Carbs ~{per_meal_carbs or 'target/meal'}g, Fat ~{per_meal_fat or 'target/meal'}g so totals across all dishes stay close to the daily targets (within ~10%).
+
 Use this nutrition context (prioritize these ingredients/macros if relevant):
 {rag_ctx if rag_ctx else "No context provided; rely on general nutrition knowledge."}
-Return JSON: {{"dishes":[{{"day":1,"name":"...","reason":"...","ingredients_used":["..."],"steps":["..."],"calories":500,"protein_g":40,"carbs_g":50,"fat_g":15}}]],"shopping_list":[{{"name":"chicken breast","quantity":2,"unit":"lb"}}]}}.
-Shopping list rules: each item MUST include numeric quantity and a unit from [g, kg, oz, lb, ml, l, cup, tbsp, tsp, piece]; if unsure, use quantity 1 and unit "piece".
-Days: {days}. Give specific dish names (e.g., "Spinach Feta Omelette", "Chipotle Chicken Wrap")—no generic "Morning/Lunch/Evening".
-If meals_per_day is 3, treat them as Breakfast, Lunch, Dinner in order; otherwise, rotate meal types and diversify cuisines (no all-breakfast set).
-Return exactly {needed_dishes} dishes total ({req.meals_per_day} per day), using day values 1..{days} with {req.meals_per_day} dishes per day.
-Respond with JSON only, no markdown code fences or extra text. Each dish must have 3-8 short steps (one action per step). Strictly valid JSON (no trailing commas).
+
+Return JSON with this EXACT format:
+{{
+  "dishes": [
+    {{
+      "day": 1,
+      "name": "Spinach Feta Omelette",
+      "reason": "High protein breakfast using available eggs and spinach",
+      "ingredients_used": ["eggs", "spinach", "feta cheese", "olive oil"],
+      "ingredients": [
+        {{
+          "name": "eggs",
+          "quantity": "2",
+          "unit": "count",
+          "cost": 0.5
+        }},
+        {{
+          "name": "olive oil",
+          "quantity": "1",
+          "unit": "tbsp",
+          "cost": 0.3
+        }},
+        {{
+          "name": "spinach",
+          "quantity": "50",
+          "unit": "g",
+          "cost": 0.8
+        }},
+        {{
+          "name": "feta cheese",
+          "quantity": "30",
+          "unit": "g",
+          "cost": 1.2
+        }}
+      ],
+      "steps": [
+        "Beat eggs in a bowl with salt and pepper.",
+        "Heat olive oil in a non-stick pan over medium heat.",
+        "Add spinach and cook until wilted.",
+        "Pour in beaten eggs and cook for 2-3 minutes.",
+        "Add crumbled feta cheese on one half.",
+        "Fold omelette in half and cook for another minute.",
+        "Slide onto plate and serve hot."
+      ],
+      "calories": 420,
+      "protein_g": 28,
+      "carbs_g": 8,
+      "fat_g": 32,
+      "estimated_cost": 2.8
+    }}
+  ],
+  "shopping_list": [
+    {{
+      "name": "eggs",
+      "quantity": "12",
+      "unit": "count",
+      "cost": 3.5
+    }},
+    {{
+      "name": "spinach",
+      "quantity": "200",
+      "unit": "g",
+      "cost": 2.5
+    }},
+    {{
+      "name": "feta cheese",
+      "quantity": "100",
+      "unit": "g",
+      "cost": 4.0
+    }},
+    {{
+      "name": "olive oil",
+      "quantity": "1",
+      "unit": "bottle",
+      "cost": 5.5
+    }}
+  ]
+}}
+
+CRITICAL FORMATTING RULES:
+1. Each ingredient MUST have: name, quantity (as STRING number), unit, and cost
+2. quantity should be a numeric string like "2", "100", "1.5"
+3. unit must be one of: g, kg, oz, lb, ml, l, cup, tbsp, tsp, count, piece, bottle
+4. For metric weights use: g or kg (e.g., "100" with unit "g")
+5. For volumes use: ml, l, cup, tbsp, tsp
+6. For countable items use: count or piece
+7. cost should be a number (not string)
+8. estimated_cost for each dish = sum of all ingredient costs for that dish
+9. Steps must be an array of 3-8 clear, actionable strings
+10. All numeric fields (calories, protein_g, carbs_g, fat_g) must be integers
+11. Never leave any field null - always provide reasonable estimates
+
+Shopping list rules:
+- Aggregate quantities across all dishes
+- Each item MUST include numeric quantity, unit, and estimated total cost
+- Use reasonable package sizes (e.g., eggs by dozen, meat by lb/kg)
+
+Days: {days}. Give specific dish names—no generic "Morning/Lunch/Evening".
+Return exactly {needed_dishes} dishes total ({req.meals_per_day} per day), using day values 1..{days}.
+
+Respond with ONLY valid JSON, no markdown code fences, no extra text before or after.
 """
 
 
@@ -617,7 +921,14 @@ You are a chef. Given this food description: "{caption}" produce a recipe as JSO
 {{
   "name": "Dish name",
   "summary": "One sentence summary",
-  "ingredients": [{{"item": "string", "quantity": "string"}}],
+  "ingredients": [
+    {{
+      "name": "eggs",
+      "quantity": "2",
+      "unit": "count",
+      "cost": 0.5
+    }}
+  ],
   "steps": ["Step 1", "Step 2", "Step 3"],
   "calories": 500,
   "protein_g": 30,
@@ -626,6 +937,7 @@ You are a chef. Given this food description: "{caption}" produce a recipe as JSO
 }}
 Nutrition context (use if relevant): {rag_ctx if rag_ctx else "none"}.
 Rules: return JSON only; include macros and calories; 3-8 concise steps; avoid generic names; strictly valid JSON (no trailing commas, no markdown).
+Each ingredient must have quantity as string number, unit, and cost.
 """
 
 
@@ -650,9 +962,40 @@ Ingredients to prioritize: {ingredients_txt}. Keep affordable and simple.
 Targets: {targets_txt if targets_txt else 'keep balanced macros and calories close to targets'}.
 Days: {days}, meals per day: {req.meals_per_day}. Return the same number of dishes ({needed_dishes}) with day values 1..{days} and {req.meals_per_day} per day.
 Use nutrition context if helpful: {rag_ctx if rag_ctx else 'none'}.
-Return JSON only in the same shape as before: {{"dishes":[{{"day":1,"name":"...","reason":"...","ingredients_used":["..."],"steps":["..."],"calories":500,"protein_g":40,"carbs_g":50,"fat_g":15}}]}}.
-Include a shopping_list array with ingredient name, quantity, unit aggregated across dishes: "shopping_list":[{{"name":"salmon","quantity":2,"unit":"fillet"}}].
-Shopping list rules: each item MUST include numeric quantity and a unit from [g, kg, oz, lb, ml, l, cup, tbsp, tsp, piece]; if unsure, use quantity 1 and unit "piece".
+Return JSON only in the same shape as before with proper ingredient formatting:
+{{
+  "dishes": [
+    {{
+      "day": 1,
+      "name": "...",
+      "reason": "...",
+      "ingredients_used": ["..."],
+      "ingredients": [
+        {{
+          "name": "chicken breast",
+          "quantity": "200",
+          "unit": "g",
+          "cost": 3.5
+        }}
+      ],
+      "steps": ["..."],
+      "calories": 500,
+      "protein_g": 40,
+      "carbs_g": 50,
+      "fat_g": 15,
+      "estimated_cost": 5.5
+    }}
+  ],
+  "shopping_list": [
+    {{
+      "name": "salmon",
+      "quantity": "500",
+      "unit": "g",
+      "cost": 8.5
+    }}
+  ]
+}}
+Shopping list rules: each item MUST include quantity as string number, unit from [g, kg, oz, lb, ml, l, cup, tbsp, tsp, piece, count], and cost.
 No markdown, no extra text, strictly valid JSON, 3-8 concise steps per dish.
 """
 
@@ -676,7 +1019,7 @@ def _normalize_steps(raw_steps: List[str]) -> List[str]:
                 steps.append(clean)
     cleaned: List[str] = []
     for s in steps:
-        txt = re.sub(r"[\\s.;,:-]+$", "", s).strip()
+        txt = re.sub(r"[\s.;,:-]+$", "", s).strip()
         if not txt:
             continue
         if txt[-1] not in ".!?":
@@ -684,12 +1027,11 @@ def _normalize_steps(raw_steps: List[str]) -> List[str]:
         cleaned.append(txt)
     return cleaned[:8] if cleaned else raw_steps
 
+
 def _validate_and_normalize_dishes(data: dict, req: RecommendRequest) -> Tuple[List[DishRecommendation], Optional[str]]:
     """
-    Validate the JSON structure from the model and normalize dishes:
-    - enforce day bounds and coverage (day 1 and last day present for multi-day)
-    - deduplicate names
-    - normalize steps
+    Validate the JSON structure from the model and normalize dishes.
+    Updated to properly parse ingredient quantities with units.
     """
     days = 1 if req.period == RecommendationPeriod.one_day else 7
     needed_dishes = req.meals_per_day * days
@@ -699,37 +1041,63 @@ def _validate_and_normalize_dishes(data: dict, req: RecommendRequest) -> Tuple[L
 
     dishes: List[DishRecommendation] = []
     seen_names: Dict[str, int] = {}
+    
     for d in raw_list:
         day_val = int(d.get("day", 1))
         if day_val < 1 or day_val > days:
             continue
+            
         name = (d.get("name") or "Dish").strip() or "Dish"
         count = seen_names.get(name.lower(), 0) + 1
         seen_names[name.lower()] = count
         if count > 1:
             name = f"{name} #{count}"
+            
         raw_steps = _normalize_steps([str(s) for s in d.get("steps", []) if s])
+        estimated_cost = _coerce_number(d.get("estimated_cost"))
+        
+        # Parse ingredients with proper quantity/unit handling
+        ingredient_costs: Optional[List[IngredientCost]] = None
+        ing_list = d.get("ingredients")
+        if isinstance(ing_list, list):
+            parsed: List[IngredientCost] = []
+            for ing in ing_list:
+                if not isinstance(ing, dict):
+                    continue
+                parsed.append(_parse_ingredient_from_dict(ing))
+            
+            ingredient_costs = parsed if parsed else None
+            
+            # Calculate estimated_cost from ingredients if not provided
+            if estimated_cost is None and ingredient_costs:
+                estimated_cost = sum(ic.cost or 0 for ic in ingredient_costs if ic.cost is not None)
+                estimated_cost = round(estimated_cost, 2) if estimated_cost else None
+
         dishes.append(
             DishRecommendation(
                 day=day_val,
                 name=name,
                 reason=d.get("reason", ""),
                 ingredients_used=[str(i) for i in d.get("ingredients_used", []) if i],
+                ingredients=ingredient_costs,
                 steps=raw_steps,
-                calories=d.get("calories"),
-                protein_g=d.get("protein_g"),
-                carbs_g=d.get("carbs_g"),
-                fat_g=d.get("fat_g"),
+                calories=_coerce_number(d.get("calories")),
+                protein_g=_coerce_number(d.get("protein_g")),
+                carbs_g=_coerce_number(d.get("carbs_g")),
+                fat_g=_coerce_number(d.get("fat_g")),
+                estimated_cost=estimated_cost,
             )
         )
 
     if not dishes:
         return [], "no valid dishes after validation"
 
+    # Validate day coverage
     days_present = {d.day for d in dishes}
     if days > 1 and (1 not in days_present or days not in days_present):
         return [], f"missing day coverage (need day 1 and day {days})"
 
+    # Ensure we have the right number of dishes
     if len(dishes) < needed_dishes:
         base = dishes[:]
         while len(dishes) < needed_dishes:
@@ -740,18 +1108,24 @@ def _validate_and_normalize_dishes(data: dict, req: RecommendRequest) -> Tuple[L
                     name=src.name,
                     reason=src.reason,
                     ingredients_used=src.ingredients_used,
+                    ingredients=src.ingredients,
                     steps=src.steps,
                     calories=src.calories,
                     protein_g=src.protein_g,
                     carbs_g=src.carbs_g,
                     fat_g=src.fat_g,
+                    estimated_cost=src.estimated_cost,
                 )
             )
     if len(dishes) > needed_dishes:
         dishes = dishes[:needed_dishes]
+        
+    # Ensure correct day numbering
     for idx, dish in enumerate(dishes):
         dish.day = (idx // req.meals_per_day) + 1
+        
     return dishes, None
+
 
 def _default_hf_model(req_model: Optional[str] = None) -> Optional[str]:
     """
@@ -776,14 +1150,14 @@ def _default_openai_model(req_model: Optional[str] = None) -> Optional[str]:
     Choose an OpenAI model in priority order:
     1) Request override
     2) First entry in config/models.json[openai]
-    3) OPENAI_MODEL env (or default gpt-4.1-mini)
+    3) OPENAI_MODEL env (or default gpt-4o-mini)
     """
     if req_model:
         return req_model
     catalog = _load_model_catalog()
     if catalog.get("openai"):
         return catalog["openai"][0]
-    return os.getenv("OPENAI_MODEL") or "gpt-4.1-mini"
+    return os.getenv("OPENAI_MODEL") or "gpt-4o-mini"
 
 
 def _recipe_model_name(override: Optional[str] = None) -> Optional[str]:
@@ -853,7 +1227,6 @@ def _generate_recipe_from_caption(
         return None, "", "HF parse failed"
 
     return None, "", get_last_hf_error() or "HF generation failed"
-
 
 
 def _fallback_recommendations(req: RecommendRequest) -> List[DishRecommendation]:
@@ -980,122 +1353,6 @@ def _ingredient_pool(req: RecommendRequest) -> List[str]:
     return [i for i in staples.get(req.dietary_preference, staples[DietaryPreference.omnivore]) if _safe(i)]
 
 
-def _generate_recommendations_with_hf(
-    req: RecommendRequest,
-) -> Tuple[Optional[List[DishRecommendation]], Optional[int], Optional[str], Optional[List[ShoppingItem]], Optional[str]]:
-    """
-    Generate dishes using the Hugging Face recipe model (HF_MODEL_ID).
-    Returns dishes, parameter count, model_id used, and an error string (if any).
-    """
-    model_id = _default_hf_model(req.hf_model_id)
-    if not model_id:
-        return None, None, None, "HF_MODEL_ID not set"
-
-    days = 1 if req.period == RecommendationPeriod.one_day else 7
-    needed_dishes = req.meals_per_day * days
-    ingredients_txt = ", ".join(req.ingredients) if req.ingredients else "pantry staples (e.g., rice, eggs, beans, greens)"
-    allergies_txt = ", ".join(req.allergies) if req.allergies else "none"
-    profile_txt = "not provided"
-    targets_txt = "balance macros and keep variety"
-    day_prompt = (
-        f"Return exactly {needed_dishes} dishes with day numbers cycling 1..{days}; ensure day 1 and day {days} are present and avoid repeating dish names."
-        if days > 1
-        else f"Return exactly {needed_dishes} dishes for day 1."
-    )
-    if req.profile:
-        targets = compute_recommendation_targets(req.profile, req.macro_split, req.target_calories, req.goal)
-        profile_txt = (
-            f"{req.profile.sex}, {req.profile.age}y, {req.profile.height_cm}cm, "
-            f"{req.profile.weight_kg}kg, activity {req.profile.activity_level.value}"
-        )
-        targets_txt = (
-            f"calories ~{targets['calories']} kcal/day, macros P:{targets['protein_g']}g "
-            f"C:{targets['carbs_g']}g F:{targets['fat_g']}g (split "
-            f"{req.macro_split.protein_pct}/{req.macro_split.carbs_pct}/{req.macro_split.fat_pct})"
-        )
-
-    prompt = f"""
-You are a nutrition chef. Create dish recommendations as structured JSON.
-Diet: {req.dietary_preference.value}. Goal: {req.goal.replace('_',' ')}. Allergies: {allergies_txt}.
-Profile: {profile_txt}. Targets: {targets_txt}. Meals per day: {req.meals_per_day}. Days: {days}.
-Budget: {req.budget_amount if req.budget_amount else 'flexible'} (keep ingredients affordable and simple).
-Allowed ingredients to focus on: {ingredients_txt}. Add pantry staples like herbs, oil, salt/pepper as needed.
-Return JSON only, no markdown, exactly this shape:
-{{
-  "dishes":[
-    {{
-      "day": 1,
-      "name": "Chipotle Chicken Wrap",
-      "reason": "Uses listed ingredients and fits macros/goal.",
-      "ingredients_used": ["chicken", "rice", "spinach"],
-      "steps": ["Prep chicken", "Cook chicken with spices", "Assemble wrap with spinach and rice"],
-      "calories": 500,
-      "protein_g": 40,
-      "carbs_g": 45,
-      "fat_g": 15
-    }}
-  ]
-}}
-Rules:
-- {day_prompt}
-- 3-8 concise steps per dish; no markdown; JSON only.
-- Diversify meal names/cuisines; avoid generic names like "Meal 1".
-Strictly output valid JSON (no trailing commas).
-"""
-    raw = generate_hf_recipes([prompt], model_id=model_id, **_hf_generation_settings())
-    if not raw:
-        return None, None, model_id, None, get_last_hf_error() or "generation returned empty"
-
-    # raw is a list (batch) from pipeline; use the first entry.
-    raw_text = raw[0]
-    _log_model_output(f"huggingface:{model_id}", raw_text)
-    data = _parse_json_block(raw_text)
-    shopping_list = _extract_shopping_items(data) if data else []
-    fallback_text_dishes: List[DishRecommendation] = []
-    if not data:
-        # Some chat models may ignore the JSON instruction; attempt a loose parse into a single dish.
-        title, ingredients, steps = _parse_hf_recipe(raw_text)
-        fallback_text_dishes.append(
-            DishRecommendation(
-                day=1,
-                name=title or "Dish 1",
-                reason="Parsed from raw model output.",
-                ingredients_used=ingredients or req.ingredients or ["pantry staples"],
-                steps=_normalize_steps(steps or ["Prep ingredients", "Cook until done", "Serve hot"]),
-                calories=None,
-                protein_g=None,
-                carbs_g=None,
-                fat_g=None,
-            )
-        )
-        data = {"dishes": []}
-
-    dishes, validation_err = _validate_and_normalize_dishes(data, req)
-    if not dishes and fallback_text_dishes:
-        dishes = fallback_text_dishes
-    if not dishes:
-        return None, None, model_id, shopping_list, validation_err or "parse failed"
-    # Get parameter count from cache if available.
-    _, _, _, param_count = get_hf_pipeline(model_id_override=model_id)
-    return dishes, param_count, model_id, shopping_list, None
-
-def _generate_recommendations_with_openai(
-    req: RecommendRequest, prompt: str
-) -> Tuple[Optional[List[DishRecommendation]], str, Optional[int], Optional[List[ShoppingItem]], Optional[str]]:
-    model_id = _default_openai_model(req.openai_model)
-    client = OpenAIRecipeClient(model_id=model_id)
-    raw, err = client.generate(prompt)
-    if not raw:
-        return None, '', None, None, err or 'OpenAI generation failed'
-    data = _parse_json_block(_sanitize_jsonish(raw))
-    if not data:
-        return None, '', None, None, 'OpenAI parse failed'
-    shopping_list = _extract_shopping_items(data)
-    dishes, validation_err = _validate_and_normalize_dishes(data, req)
-    if not dishes:
-        return None, '', None, shopping_list, validation_err or 'OpenAI returned no dishes'
-    return dishes, f"openai:{model_id}", None, shopping_list, None
-
 def _run_prompt_with_hf(
     req: RecommendRequest, prompt: str
 ) -> Tuple[Optional[List[DishRecommendation]], Optional[int], Optional[str], Optional[List[ShoppingItem]], Optional[str]]:
@@ -1117,6 +1374,7 @@ def _run_prompt_with_hf(
     _, _, _, param_count = get_hf_pipeline(model_id_override=model_id)
     return dishes, param_count, model_id, shopping_list, None
 
+
 def _run_prompt_with_ollama(
     req: RecommendRequest, prompt: str
 ) -> Tuple[Optional[List[DishRecommendation]], Optional[str], Optional[List[ShoppingItem]], Optional[str]]:
@@ -1129,16 +1387,31 @@ def _run_prompt_with_ollama(
     cleaned = raw.replace("```json", "").replace("```", "")
     data = _parse_json_block(_sanitize_jsonish(cleaned))
     if not data:
-        # As a last resort, return a deterministic fallback to keep the UX responsive.
-        fallback = _fallback_recommendations(req)
-        if fallback:
-            return fallback, f"ollama:{model} (fallback)", [], None
         return None, None, None, "Ollama parse failed"
     shopping_list = _extract_shopping_items(data)
     dishes, validation_err = _validate_and_normalize_dishes(data, req)
     if not dishes:
         return None, None, shopping_list, validation_err or "Ollama returned no dishes"
     return dishes, f"ollama:{model}", shopping_list, None
+
+
+def _generate_recommendations_with_openai(
+    req: RecommendRequest, prompt: str
+) -> Tuple[Optional[List[DishRecommendation]], str, Optional[int], Optional[List[ShoppingItem]], Optional[str]]:
+    model_id = _default_openai_model(req.openai_model)
+    client = OpenAIRecipeClient(model_id=model_id)
+    raw, err = client.generate(prompt)
+    if not raw:
+        return None, '', None, None, err or 'OpenAI generation failed'
+    data = _parse_json_block(_sanitize_jsonish(raw))
+    if not data:
+        return None, '', None, None, 'OpenAI parse failed'
+    shopping_list = _extract_shopping_items(data)
+    dishes, validation_err = _validate_and_normalize_dishes(data, req)
+    if not dishes:
+        return None, '', None, shopping_list, validation_err or 'OpenAI returned no dishes'
+    return dishes, f"openai:{model_id}", None, shopping_list, None
+
 
 def generate_recommendations_with_llm(
     req: RecommendRequest,
@@ -1255,17 +1528,11 @@ def refine_recommendations_with_llm(
             return ollama_dishes, provider or "", None, shopping, None
         return None, "", None, shopping, err
 
-    shopping = shopping_hf = shopping_ollama = None
-    oa_dishes, provider, _, shopping, oa_err = _generate_recommendations_with_openai(req, prompt)
-    if oa_dishes:
-        return oa_dishes, provider, None, shopping, None
-    hf_dishes, params, model_id, shopping_hf, hf_err = _run_prompt_with_hf(req, prompt)
-    if hf_dishes:
-        return hf_dishes, f"huggingface:{model_id}", params, shopping_hf, None
+    shopping_ollama = None
     ollama_dishes, provider, shopping_ollama, ollama_err = _run_prompt_with_ollama(req, prompt)
     if ollama_dishes:
         return ollama_dishes, provider or "", None, shopping_ollama, None
-    return None, "", None, shopping or shopping_hf or shopping_ollama, oa_err or hf_err or ollama_err or "No model configured for refine"
+    return None, "", None, shopping_ollama, ollama_err or "No model configured for refine"
 
 
 def generate_plan_with_llm(req: PlanRequest, targets: dict) -> Optional[List[DayPlan]]:
@@ -1463,12 +1730,12 @@ def recommend(req: RecommendRequest) -> RecommendationResponse:
 
     try:
         dishes, provider, param_count, shopping_list, err = _run_with_timeout(
-            lambda: generate_recommendations_with_llm(clean_req), timeout_seconds=30
+            lambda: generate_recommendations_with_llm(clean_req), timeout_seconds=60
         )
     except TimeoutError:
         raise HTTPException(
             status_code=504,
-            detail="LLM recommendation generation timed out after 30s; request canceled server-side.",
+            detail="LLM recommendation generation timed out after 60s; request canceled server-side.",
         )
 
     if dishes is None:
@@ -1479,16 +1746,21 @@ def recommend(req: RecommendRequest) -> RecommendationResponse:
 
     notes: List[str] = []
     instacart_links: Optional[dict] = None
-    shopping_items_payload: Optional[List[dict]] = (
-        [item.dict() for item in shopping_list] if shopping_list else None
-    )
-    if not shopping_items_payload and base_req.ingredients:
-        shopping_items_payload = [{"name": ing, "quantity": 1, "unit": "piece"} for ing in base_req.ingredients]
-    if not shopping_items_payload and clean_req.ingredients:
-        shopping_items_payload = [{"name": ing, "quantity": 1, "unit": "piece"} for ing in clean_req.ingredients]
+    shopping_items_payload: Optional[List[dict]] = None
+    
+    if shopping_list:
+        shopping_items_payload = [item.dict() for item in shopping_list]
+    else:
+        items_from_dishes = _build_shopping_from_dishes(dishes)
+        if items_from_dishes:
+            shopping_items_payload = items_from_dishes
+        elif clean_req.ingredients:
+            shopping_items_payload = [{"name": ing, "quantity": 1.0, "unit": "piece", "cost": None} for ing in clean_req.ingredients]
+    
     if provider:
         notes.append(f"Generated by {provider}.")
-    if shopping_list:
+    
+    if shopping_items_payload:
         try:
             instacart_links = create_shopping_list_with_search_links(
                 shopping_items_payload, title="LLM Grocery List"
@@ -1501,7 +1773,13 @@ def recommend(req: RecommendRequest) -> RecommendationResponse:
         used.update([u.lower() for u in d.ingredients_used])
     unknown = [i for i in ingredients if i not in used]
 
-    return RecommendationResponse(
+    total_cost = None
+    if shopping_items_payload:
+        total_cost = sum((item.get("cost") or 0) for item in shopping_items_payload)
+        if total_cost:
+            total_cost = round(total_cost, 2)
+
+    resp = RecommendationResponse(
         period=req.period,
         dishes=dishes,
         unknown_items=unknown,
@@ -1513,9 +1791,15 @@ def recommend(req: RecommendRequest) -> RecommendationResponse:
         cuisine=clean_req.cuisine,
         model_provider=provider,
         model_parameters=param_count,
-        shopping_list=shopping_items_payload,
+        shopping_list=[ShoppingItem(**item) for item in shopping_items_payload] if shopping_items_payload else None,
         shopping_links=instacart_links,
+        total_shopping_cost=total_cost,
     )
+    try:
+        print("[RECOMMEND RESPONSE]", json.dumps(resp.dict(), indent=2))
+    except Exception:
+        pass
+    return resp
 
 
 @app.post("/recommend/refine", response_model=RecommendationResponse)
@@ -1539,12 +1823,21 @@ def refine_recommendations(req: RefineRequest) -> RecommendationResponse:
 
     notes: List[str] = []
     instacart_links: Optional[dict] = None
-    shopping_items_payload: Optional[List[dict]] = (
-        [item.dict() for item in shopping_list] if shopping_list else None
-    )
+    shopping_items_payload: Optional[List[dict]] = None
+    
+    if shopping_list:
+        shopping_items_payload = [item.dict() for item in shopping_list]
+    else:
+        items_from_dishes = _build_shopping_from_dishes(dishes)
+        if items_from_dishes:
+            shopping_items_payload = items_from_dishes
+        elif base_req.ingredients:
+            shopping_items_payload = [{"name": ing, "quantity": 1.0, "unit": "piece", "cost": None} for ing in base_req.ingredients]
+    
     if provider:
         notes.append(f"Refined by {provider}.")
-    if shopping_list:
+    
+    if shopping_items_payload:
         try:
             instacart_links = create_shopping_list_with_search_links(
                 shopping_items_payload, title="LLM Grocery List (Refined)"
@@ -1556,6 +1849,12 @@ def refine_recommendations(req: RefineRequest) -> RecommendationResponse:
     for d in dishes:
         used.update([u.lower() for u in d.ingredients_used])
     unknown = [i for i in base_req.ingredients if i not in used]
+
+    total_cost = None
+    if shopping_items_payload:
+        total_cost = sum((item.get("cost") or 0) for item in shopping_items_payload)
+        if total_cost:
+            total_cost = round(total_cost, 2)
 
     return RecommendationResponse(
         period=base_req.period,
@@ -1569,8 +1868,9 @@ def refine_recommendations(req: RefineRequest) -> RecommendationResponse:
         cuisine=base_req.cuisine,
         model_provider=provider,
         model_parameters=param_count,
-        shopping_list=shopping_items_payload,
+        shopping_list=[ShoppingItem(**item) for item in shopping_items_payload] if shopping_items_payload else None,
         shopping_links=instacart_links,
+        total_shopping_cost=total_cost,
     )
 
 
@@ -1589,7 +1889,7 @@ def rag_query(req: RagQueryRequest) -> dict:
     if not rag:
         raise HTTPException(status_code=503, detail="RAG service unavailable; check dependencies.")
     prompt, sources = rag.build_prompt(req.question, k=req.k)
-    raw = _ollama_generate(prompt, model=_recipe_model_name() or os.getenv("OLLAMA_MODEL"))
+    raw = _ollama_generate(prompt, model=_recipe_model_name() or os.getenv("OLLAMA_MODEL") or "")
     if not raw:
         raise HTTPException(status_code=503, detail="LLM unavailable for RAG response.")
     return {"answer": raw, "sources": sources}
