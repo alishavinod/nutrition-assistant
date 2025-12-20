@@ -26,7 +26,7 @@
     }
     body {
       margin: 0;
-      padding: 48px 24px 64px;
+      padding: clamp(16px, 5vw, 64px) clamp(16px, 6vw, 48px);
       font-family: 'Outfit', sans-serif;
       color: white;
       display: flex;
@@ -46,17 +46,6 @@
       grid-template-columns: 1fr;
       gap: 10px;
       align-items: center;
-    }
-    .badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 14px;
-      border-radius: 999px;
-      background: rgba(255,255,255,0.9);
-      font-weight: 700;
-      box-shadow: 0 10px 28px rgba(0,0,0,0.08);
-      color: black;
     }
     h1 { margin: 6px 0 10px; font-size: 32px; line-height: 1.15; }
     .pill {
@@ -102,7 +91,34 @@
       transition: transform 0.16s ease, box-shadow 0.16s ease;
     }
     .btn:hover { transform: translateY(-1px); box-shadow: 0 16px 34px rgba(58,197,139,0.35); }
-    pre {
+    .results { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-top: 12px; }
+    .recipe-card {
+      background: rgba(255,255,255,0.92);
+      color: #0f172a;
+      border-radius: 14px;
+      padding: 14px;
+      border: 1px solid var(--border);
+      box-shadow: 0 12px 32px rgba(0,0,0,0.12);
+      width: fit-content;
+    }
+    .recipe-card h3 { margin: 0 0 8px; font-size: 18px; width: max-content;}
+    .recipe-card .meta { display: flex; gap: 10px; flex-wrap: wrap; color: #475569; font-size: 13px; margin-bottom: 8px;}
+    .pill-sm { padding: 6px 8px; border-radius: 10px; background: #eef2f7; }
+    .thumb {
+      width: 250px;
+      height: 250px;
+      width: 100%;
+      height: 250px;
+      border-radius: 10px;
+      object-fit: cover;
+      background: linear-gradient(135deg, rgba(58,197,139,0.12), rgba(29,98,198,0.12));
+      margin-bottom: 10px;
+      display: block;
+    }
+    .inline-list { color: #0f172a; margin: 0 0 8px; font-weight: 600; }
+    .inline-list span { color: #475569; font-weight: 400; }
+    .steps { margin: 0; padding-left: 18px; color: #111827; }
+    .fallback-json {
       background: #f8fafc;
       border: 1px solid #e5e7eb;
       padding: 12px;
@@ -113,7 +129,13 @@
       box-shadow: inset 0 1px 2px rgba(0,0,0,0.04);
     }
     @media (max-width: 960px) {
-      body { padding: 32px 18px 48px; }
+      body { padding: 24px 18px 40px; }
+    }
+    @media (max-width: 700px) {
+      body { padding: 16px 14px 28px; }
+      .actions { flex-direction: column; align-items: stretch; }
+      .actions input, .actions .btn, #model_id { width: 100%; }
+      h1 { font-size: 26px; }
     }
   </style>
 </head>
@@ -121,7 +143,6 @@
   <div class="container">
     <div class="card hero">
       <div>
-        <div class="badge">Image to Recipe</div>
         <h1>Upload a dish photo and get a structured recipe back.</h1>
         <p>Choose your backend/model, then we’ll return ingredients, steps, and tags from the image.</p>
         <div class="pill">Status: <span id="upload-status" style="font-weight:700;">Idle</span></div>
@@ -138,7 +159,8 @@
         <input type="file" id="image-file" accept="image/*" />
         <button id="upload-btn" class="btn">Upload &amp; Describe</button>
       </div>
-      <pre id="upload-output">No image uploaded.</pre>
+      <div id="upload-output" class="results">No image uploaded.</div>
+      <pre id="raw-output" class="fallback-json" style="display:none;"></pre>
     </div>
   </div>
 
@@ -178,6 +200,47 @@
     const uploadBtn = document.getElementById('upload-btn');
     const uploadStatus = document.getElementById('upload-status');
     const uploadOutput = document.getElementById('upload-output');
+    const rawOutput = document.getElementById('raw-output');
+    const previewEl = document.getElementById('preview');
+    let previewSrc = '';
+
+    function renderRecipes(data) {
+      if (!uploadOutput) return;
+      const asArray = Array.isArray(data?.dishes) ? data.dishes : (Array.isArray(data) ? data : data?.recipe ? [data.recipe] : data?.name ? [data] : []);
+      if (!asArray || !asArray.length) {
+        uploadOutput.textContent = 'No recipes returned.';
+        if (rawOutput) rawOutput.style.display = 'none';
+        return;
+      }
+
+      uploadOutput.innerHTML = asArray.map((d, idx) => {
+        const name = d.name || `Dish ${idx + 1}`;
+        const img = d.image_url || d.image || previewSrc || '';
+        const ingredients = (d.ingredients || d.ingredients_used || []).map((ing) => {
+          if (typeof ing === 'string') return ing;
+          if (ing?.item) return `${ing.item}${ing.quantity ? ` (${ing.quantity})` : ''}`;
+          if (ing?.name) return `${ing.name}${ing.quantity ? ` (${ing.quantity}${ing.unit ? ' ' + ing.unit : ''})` : ''}`;
+          return '';
+        }).filter(Boolean).join(', ');
+        const steps = Array.isArray(d.steps) ? d.steps : [];
+        const metaBits = [];
+        if (d.calories) metaBits.push(`${d.calories} kcal`);
+        if (d.protein_g) metaBits.push(`${d.protein_g}g protein`);
+        if (d.carbs_g) metaBits.push(`${d.carbs_g}g carbs`);
+        if (d.fat_g) metaBits.push(`${d.fat_g}g fat`);
+        const meta = metaBits.join(' · ');
+        return `
+          <div class="recipe-card">
+            ${img ? `<img class="thumb" src="${img}" alt="${name}">` : `<div class="thumb"></div>`}
+            <h3>${name}</h3>
+            ${meta ? `<div class="meta"><span class="pill-sm">${meta}</span></div>` : ''}
+            ${ingredients ? `<div class="inline-list">Ingredients: <span>${ingredients}</span></div>` : ''}
+            ${steps.length ? `<ol class="steps">${steps.map(s => `<li>${s}</li>`).join('')}</ol>` : ''}
+          </div>
+        `;
+      }).join('');
+      if (rawOutput) rawOutput.style.display = 'none';
+    }
     if (uploadBtn) {
       uploadBtn.addEventListener('click', async () => {
         const fileInput = document.getElementById('image-file');
@@ -187,9 +250,19 @@
           if (uploadStatus) uploadStatus.textContent = 'No file selected';
           return;
         }
+        // Ensure preview is visible even if the same file is re-selected
+        const file = fileInput.files[0];
+        if (file) {
+          const blobUrl = URL.createObjectURL(file);
+          previewSrc = blobUrl;
+          if (previewEl) {
+            previewEl.src = blobUrl;
+            previewEl.style.display = 'block';
+          }
+        }
         await loadModelOptions(backend);
         const form = new FormData();
-        form.append('file', fileInput.files[0]);
+        form.append('file', file);
         const selectedModel = modelSelect ? modelSelect.value : '';
         if (selectedModel.startsWith('hf:')) {
           form.append('hf_model_id', selectedModel.replace('hf:', ''));
@@ -202,12 +275,41 @@
         try {
           const resp = await fetch(`${backend}/image-recipe`, { method: 'POST', body: form });
           const data = await resp.json();
-          uploadOutput.textContent = JSON.stringify(data, null, 2);
+          renderRecipes(data);
+          if (rawOutput) {
+            rawOutput.textContent = JSON.stringify(data, null, 2);
+            rawOutput.style.display = resp.ok ? 'none' : 'block';
+          }
           uploadStatus.textContent = resp.ok ? 'Done' : 'Error';
         } catch (e) {
-          uploadOutput.textContent = `Error: ${e}`;
+          if (uploadOutput) uploadOutput.textContent = `Error: ${e}`;
+          if (rawOutput) {
+            rawOutput.textContent = `Error: ${e}`;
+            rawOutput.style.display = 'block';
+          }
           if (uploadStatus) uploadStatus.textContent = 'Error';
         }
+      });
+    }
+
+    const fileInputEl = document.getElementById('image-file');
+    if (fileInputEl) {
+      fileInputEl.addEventListener('change', () => {
+        if (!previewEl) return;
+        const file = fileInputEl.files?.[0];
+        if (!file) {
+          previewSrc = '';
+          previewEl.style.display = 'none';
+          previewEl.src = '';
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = e => {
+          previewSrc = e.target?.result || '';
+          previewEl.src = previewSrc;
+          previewEl.style.display = 'block';
+        };
+        reader.readAsDataURL(file);
       });
     }
 

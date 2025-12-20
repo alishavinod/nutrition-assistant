@@ -31,6 +31,9 @@ from .instacart_hook import create_shopping_list_with_search_links, generate_htm
 ROOT_DIR = Path(__file__).resolve().parents[2]
 _EXECUTOR = ThreadPoolExecutor(max_workers=4)
 
+
+import os
+
 app = FastAPI(title="Nutrition Planner", version="0.1.0")
 
 # Allow browser demos from static hosts (e.g., GitHub Pages hitting localhost backend).
@@ -275,10 +278,10 @@ class DishRecommendation(BaseModel):
     ingredients_used: List[str]
     ingredients: Optional[List[IngredientCost]] = None
     steps: List[str] = Field(default_factory=list)
-    calories: Optional[int] = None
-    protein_g: Optional[int] = None
-    carbs_g: Optional[int] = None
-    fat_g: Optional[int] = None
+    calories: Optional[float] = None
+    protein_g: Optional[float] = None
+    carbs_g: Optional[float] = None
+    fat_g: Optional[float] = None
     estimated_cost: Optional[float] = None
     
     class Config:
@@ -365,6 +368,18 @@ def _coerce_number(val) -> Optional[float]:
         num_val, _ = _parse_quantity_with_unit(val)
         return num_val
     return None
+
+def _to_int(val) -> Optional[int]:
+    """
+    Convert to nearest int if numeric; otherwise None.
+    """
+    num = _coerce_number(val)
+    if num is None:
+        return None
+    try:
+        return int(round(num))
+    except Exception:
+        return None
 
 
 def _normalize_shopping_items(items: Optional[List[ShoppingItem]]) -> List[ShoppingItem]:
@@ -1528,11 +1543,17 @@ def refine_recommendations_with_llm(
             return ollama_dishes, provider or "", None, shopping, None
         return None, "", None, shopping, err
 
-    shopping_ollama = None
+    shopping = shopping_hf = shopping_ollama = None
+    oa_dishes, provider, _, shopping, oa_err = _generate_recommendations_with_openai(req, prompt)
+    if oa_dishes:
+        return oa_dishes, provider, None, shopping, None
+    hf_dishes, params, model_id, shopping_hf, hf_err = _run_prompt_with_hf(req, prompt)
+    if hf_dishes:
+        return hf_dishes, f"huggingface:{model_id}", params, shopping_hf, None
     ollama_dishes, provider, shopping_ollama, ollama_err = _run_prompt_with_ollama(req, prompt)
     if ollama_dishes:
         return ollama_dishes, provider or "", None, shopping_ollama, None
-    return None, "", None, shopping_ollama, ollama_err or "No model configured for refine"
+    return None, "", None, shopping or shopping_hf or shopping_ollama, oa_err or hf_err or ollama_err or "No model configured for refine"
 
 
 def generate_plan_with_llm(req: PlanRequest, targets: dict) -> Optional[List[DayPlan]]:

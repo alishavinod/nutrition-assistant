@@ -26,7 +26,7 @@
     }
     body {
       margin: 0;
-      padding: 48px 24px 64px;
+      padding: clamp(16px, 4vw, 64px) clamp(16px, 6vw, 48px);
       font-family: 'Outfit', sans-serif;
       color: var(--text);
       display: flex;
@@ -41,7 +41,7 @@
       padding: 22px 24px;
       box-shadow: var(--shadow);
       backdrop-filter: blur(8px);
-      width: 120vh;
+      width: 100%;
     }
     .hero {
       display: grid;
@@ -126,7 +126,6 @@
       border-radius: 16px;
       padding: 14px;
       box-shadow: 0 10px 26px rgba(0,0,0,0.1);
-      width: 360px;
     }
     .dish-img { height: 160px; border-radius: 10px; margin-bottom: 10px; object-fit: cover; }
     .dish-card.compact { cursor: pointer; transition: transform 0.15s ease, box-shadow 0.15s ease; }
@@ -138,20 +137,15 @@
     .macro-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 14px 0; }
     .macro-grid div { background: #eef2f5; border-radius: 12px; padding: 10px; text-align: center; }
     .macro-grid span { display: block; font-size: 11px; color: #64748b; }
-    .cost-pill {
-      display: inline-block;
-      margin: 6px 0 10px;
-      padding: 8px 10px;
-      border-radius: 12px;
-      background: rgba(58,197,139,0.15);
-      color: var(--text);
-      font-weight: 700;
-      border: 1px solid rgba(0,0,0,0.06);
-    }
     .recipe { margin-top: 12px; animation: fadeIn 0.2s ease; }
     .hidden { display: none; }
     #model_id { width: 240px; }
-    #dish-cards { display: flex; flex-wrap: wrap; gap: 16px; }
+    #dish-cards {
+      display: grid;
+      gap: 16px;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      align-items: start;
+    }
     .upload { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     pre {
       background: #f8fafc;
@@ -167,10 +161,26 @@
       from { opacity: 0; transform: translateY(-4px); }
       to { opacity: 1; transform: translateY(0); }
     }
-    @media (max-width: 960px) {
-      body { padding: 32px 18px 48px; }
+    @media (max-width: 1080px) {
+      body { padding: 24px 18px 44px; }
       .hero { grid-template-columns: 1fr; }
-      #dish-cards { justify-content: center; }
+      .card { padding: 20px; }
+      h1.section-title { font-size: 26px; }
+      .hero h1 { font-size: 30px; }
+    }
+    @media (max-width: 760px) {
+      body { padding: 16px 14px 32px; }
+      .actions { flex-direction: column; align-items: stretch; }
+      .actions button,
+      .actions input,
+      .primary-btn { width: 100%; }
+      #model_id { width: 100%; }
+      .grid-4 { grid-template-columns: 1fr; }
+      .badge { font-size: 14px; }
+      .hero h1 { font-size: 26px; }
+      .macro-grid { grid-template-columns: repeat(2, 1fr); }
+      #dish-cards { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+      .actions input { margin-left: 0 !important; }
     }
   </style>
 </head>
@@ -267,7 +277,7 @@
       </label>
 
       <label>Budget amount
-        <input id="budget_amount" type="number" step="0.01" value="100" />
+        <input id="budget_amount" type="number" step="0.01" value="40" />
       </label>
 
       <label>Allergies
@@ -285,7 +295,7 @@
 
   <div class="actions" style="align-items:flex-end; gap: 10px; flex-wrap: wrap;">
     <button id="recommend" class="primary-btn" style="margin-bottom: 12px">Recommend Dishes</button>
-    <input id="refine-input" placeholder="E.g., prefer yogurt over oats, avoid almonds" style="width: 360px; padding:12px 14px; border-radius:12px; border:1px solid var(--border); color:var(--text); background:#fff; margin-bottom: 12px; margin-left: 120px;"/>
+    <input id="refine-input" placeholder="E.g., prefer yogurt over oats, avoid almonds" style="width: 360px; padding:12px 14px; border-radius:12px; border:1px solid var(--border); color:var(--text); background:#fff; margin-bottom: 12px;"/>
     <button id="refine-btn" class="primary-btn" style="margin-bottom: 12px;">Refine</button>
     <span id="refine-status" style="font-size:13px; color: var(--muted);">Idle</span>
   </div>
@@ -348,7 +358,6 @@
         <div><strong>${d.carbs_g || '-'} g</strong><span>Carbs</span></div>
         <div><strong>${d.fat_g || '-'} g</strong><span>Fat</span></div>
       </div>
-      ${d.estimated_cost ? `<div class="cost-pill">Est. cost: $${Number(d.estimated_cost).toFixed(2)}</div>` : ''}
 
       <div class="view-recipe">View Recipe ▾</div>
 
@@ -392,15 +401,12 @@
       if (!shoppingInfo) return;
       const links = res && res.shopping_links ? res.shopping_links : null;
       const list = res && res.shopping_list ? res.shopping_list : null;
-      const totalCost = res && res.total_shopping_cost ? Number(res.total_shopping_cost) : null;
+      const totalCost = typeof res?.total_shopping_cost === 'number' ? res.total_shopping_cost : null;
       if (!links && (!list || !list.length)) {
-        shoppingInfo.textContent = totalCost ? `Estimated total cost: $${totalCost.toFixed(2)}` : 'Shopping list: not available yet.';
+        shoppingInfo.textContent = 'Shopping list: not available yet.';
         return;
       }
       let html = '';
-      if (totalCost) {
-        html += `<p><strong>Estimated total cost:</strong> $${totalCost.toFixed(2)}</p>`;
-      }
       if (links && links.shopping_list_url) {
         html += `<p><a href="${links.shopping_list_url}" target="_blank">Open Instacart list</a></p>`;
       } else {
@@ -416,6 +422,9 @@
             return `<li>${name}${qty}</li>`;
           }).join('') +
           '</ul>';
+      }
+      if (totalCost !== null) {
+        html += `<div style="margin-top:6px;font-weight:700;">Estimated total: $${totalCost.toFixed(2)}</div>`;
       }
       shoppingInfo.innerHTML = html;
     }
