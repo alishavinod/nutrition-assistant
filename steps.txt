@@ -18,29 +18,14 @@ export OLLAMA_MODEL=llama3
 export HF_MODEL_ID=flax-community/t5-recipe-generation
 export HF_DEVICE=cuda
 
-
-Set up deps: 
-python3 -m pip install -r requirements.txt
-
-
-Download and install from https://ollama.com/download (DMG). 
-Launch the Ollama app once so it starts the local service.
-
-ollama pull llama3
-
-export OLLAMA_MODEL=llama3
-
 Run backend: 
 ./scripts/run_backend.sh 
 (uses uvicorn src.app.main:app --reload --port 8000)
 
 Frontend: 
 python3 -m http.server 3000 --directory public
-
 http://localhost:3000
 
-http://localhost:3000; set Backend URL to 
-http://localhost:8000
 
 API direct test: 
 curl http://127.0.0.1:8000/health and POST to /plan as in README.
@@ -48,85 +33,6 @@ curl http://127.0.0.1:8000/health and POST to /plan as in README.
 
 
 
-
-########################
-steps
-
-
-python -m pip install -r requirements.txt
-
-run the api:
-uvicorn main:app --reload
-
-
-health check
-curl http://127.0.0.1:8000/health
-
-{"status":"ok"}
-
-
-curl -X POST http://127.0.0.1:8000/plan \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "profile": {"height_cm":175,"weight_kg":70,"age":30,"sex":"male","activity_level":"moderate"},
-    "dietary_preference":"omnivore",
-    "budget_amount":100,
-    "meals_per_day":3
-  }'
-
-
-
-
-
-
-
-Download and install from https://ollama.com/download (DMG). 
-Launch the Ollama app once so it starts the local service.
-
-ollama pull llama3
-
-export OLLAMA_MODEL=llama3
-
-
-curl -X POST http://127.0.0.1:8000/plan \
--H 'Content-Type: application/json' \
--d '{
-"profile": {"height_cm":175,"weight_kg":70,"age":30,"sex":"male","activity_level":"moderate"},
-"dietary_preference":"omnivore",
-"budget_amount":100,
-"meals_per_day":3
-}'
-
-
-
-
-
-## kill
-
+## kill processes
 kill -9 $(lsof -ti tcp:8000)
 
-lsof -i tcp:8000
-kill -9 70510
-
-
-pkill -f uvicorn || true
-pkill -f "src.app.main" || true
-
-
-
-###
-
-sudo apt update
-sudo apt install python3 -y
-sudo apt install python3-pip -y
-
-sudo apt-get install git
-
-
-sudo snap install --classic code
-
-## setup git
-
-pip3 install transformers
-pip install pandas
-pip install -U langchain langchain-community langchain-core langsmith langchain-text-splitters
