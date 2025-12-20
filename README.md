@@ -51,7 +51,7 @@ curl -X POST http://127.0.0.1:8000/plan \
 Notes:
 - Cost estimation uses `backend/data/dummy_catalog.csv`; quantities are ignored and prices are placeholders.
 - No live product search; replace the dummy catalog with real pricing when available.
-- CORS is open to allow the static frontend to call the backend.
+- CORS is open to allow the static frontend to call the backend system.
 
 ## Frontend (GitHub Pages friendly)
 
