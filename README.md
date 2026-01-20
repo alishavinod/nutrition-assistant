@@ -2,6 +2,10 @@
 
 Showcase-ready repo with a structured backend/frontend split. FastAPI powers the API; a static UI works on GitHub Pages and calls your backend. Uses a dummy pricing catalog (no real product API) and a local LLM via Ollama.
 
+<img width="2700" height="1214" alt="image" src="https://github.com/user-attachments/assets/e669297d-ee91-4c23-9bfb-739a7075578d" />
+<img width="2794" height="1640" alt="image" src="https://github.com/user-attachments/assets/0f7f42db-b7dd-4173-8ebb-08eefcaf6479" />
+<img width="2308" height="1730" alt="image" src="https://github.com/user-attachments/assets/3a82e4ac-2616-4066-8133-dcb1dd4e08ce" />
+
 ## Repo Layout
 - `src/app/` — FastAPI app.
 - `public/` — Static demo UI (GitHub Pages friendly).
