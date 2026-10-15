@@ -1,5 +1,14 @@
 # Nutrition Planner Demo
 
+**Tell it your goals and budget and it plans a full week of meals that hit your daily macros, using a local LLM.**
+
+![](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white) ![](https://img.shields.io/badge/Ollama-Local%20LLM-000000?logo=ollama&logoColor=white) ![](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=white)
+
+> 👥 **Built as a team.** This repository is my copy of a project I built together with my teammates.
+
+---
+
+
 Showcase-ready repo with a structured backend/frontend split. FastAPI powers the API; a static UI works on GitHub Pages and calls your backend. Uses a dummy pricing catalog (no real product API) and a local LLM via Ollama.
 
 <img width="2700" height="1214" alt="image" src="https://github.com/user-attachments/assets/e669297d-ee91-4c23-9bfb-739a7075578d" />
